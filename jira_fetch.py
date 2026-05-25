@@ -1,18 +1,15 @@
 import requests
 from requests.auth import HTTPBasicAuth
+from dotenv import load_dotenv
+import os
 import json
 
-# ==============================
-# CONFIG — FILL THESE IN
-# ==============================
-JIRA_DOMAIN = "yourname.atlassian.net"       # e.g. nikhil.atlassian.net
-JIRA_EMAIL  = "your@email.com"               # your Atlassian login email
-JIRA_TOKEN  = "your_api_token_here"          # from id.atlassian.com
-TICKET_ID   = "DOCGEN-1"                     # your first ticket ID
+load_dotenv()
 
-# ==============================
-# FETCH TICKET
-# ==============================
+JIRA_DOMAIN = os.getenv("JIRA_DOMAIN")
+JIRA_EMAIL  = os.getenv("JIRA_EMAIL")
+JIRA_TOKEN  = os.getenv("JIRA_TOKEN")
+
 def get_jira_ticket(ticket_id: str) -> dict:
     url = f"https://{JIRA_DOMAIN}/rest/api/3/issue/{ticket_id}"
     
@@ -38,9 +35,6 @@ def get_jira_ticket(ticket_id: str) -> dict:
     
     return ticket
 
-# ==============================
-# RUN
-# ==============================
 if __name__ == "__main__":
-    ticket = get_jira_ticket(TICKET_ID)
+    ticket = get_jira_ticket("DEMO-1")
     print(json.dumps(ticket, indent=2))
