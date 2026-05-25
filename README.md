@@ -25,6 +25,8 @@ Publishes to Google Docs automatically
 - **python-dotenv** — environment management
 
 ## Project Structure
+
+```
 GenAI-Document-Writing-Assistant/
 ├── jira_fetch.py          # Connects to Jira, fetches ticket data
 ├── llm_generate.py        # Feeds ticket to LLM, generates document
@@ -34,6 +36,7 @@ GenAI-Document-Writing-Assistant/
 ├── requirements.txt       # Dependencies
 ├── .gitignore             # Ignored files
 └── .env                   # API keys (not committed)
+```
 
 ## Setup
 
