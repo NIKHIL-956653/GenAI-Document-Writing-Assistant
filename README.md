@@ -19,7 +19,7 @@ Publishes to Google Docs automatically
 - **Python** — core language
 - **Jira REST API** — ticket data source
 - **OpenRouter (Gemini 2.0 Flash)** — cloud LLM
-- **Ollama (Qwen)** — local LLM fallback
+- **Ollama (Qwen)** — local LLM, same prompt, nothing leaves the machine
 - **Google Docs API** — document publishing
 - **Google Drive API** — file management
 - **python-dotenv** — environment management
@@ -71,26 +71,20 @@ OPENROUTER_API_KEY=your_openrouter_key
 
 ## Run
 
-### Full pipeline (Jira → LLM → Save locally)
-```bash
-python main.py
-```
-
-### Publish to Google Docs
-```bash
-python gdocs_publish.py
-```
-
-### Fetch Jira ticket only
-```bash
-python jira_fetch.py
+```powershell
+python main.py DEMO-2                          # Jira → LLM → DEMO-2_document.md
+python main.py DEMO-2 --llm ollama             # same, fully local model
+python main.py DEMO-2 --publish gdocs          # + create a private Google Doc
+python main.py DEMO-2 --publish gdocs --public # + share as anyone-with-link
+python main.py DEMO-2 --publish confluence     # + create a Confluence page
 ```
 
 ## How It Works
 
 ### 1. Jira Integration
-Connects to Jira REST API using Basic Auth (email + API token).
-Fetches ticket fields: title, description, status, labels.
+Connects to Jira REST API v3 using Basic Auth (email + API token).
+Fetches title, description, status, labels. The description arrives as Atlassian Document Format
+(a JSON tree) and is flattened to plain text before it reaches the model.
 
 ### 2. LLM Document Generation
 Builds a dynamic prompt using ticket data and sends it to:
@@ -105,9 +99,9 @@ LLM generates a structured technical document with:
 - Known Limitations
 
 ### 3. Google Docs Publishing
-Uses OAuth 2.0 to authenticate with Google.
+Uses OAuth 2.0 (installed-app flow, consent once, refresh token persisted).
 Creates a new Google Doc and inserts the generated content.
-Makes the document publicly viewable.
+Private by default; `--public` shares it as anyone-with-link.
 
 ## Example Output
 

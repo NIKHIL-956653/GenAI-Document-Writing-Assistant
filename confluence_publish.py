@@ -28,10 +28,11 @@ def publish_to_confluence(title: str, content: str, space_key: str = "KAN") -> s
         url,
         json=payload,
         auth=HTTPBasicAuth(JIRA_EMAIL, JIRA_TOKEN),
-        headers={"Content-Type": "application/json"}
+        headers={"Content-Type": "application/json"},
+        timeout=60,
     )
     
-    if response.status_code != 200:
+    if response.status_code not in (200, 201):
         print(f"Error: {response.status_code} — {response.text}")
         return ""
     

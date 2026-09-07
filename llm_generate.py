@@ -5,45 +5,48 @@ from dotenv import load_dotenv
 load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-lite-001")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen2.5:latest")
 
-def generate_document_openrouter(ticket: dict) -> str:
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json"
-    }
-
-    system_prompt = """You are a senior technical writer at a software company.
+SYSTEM_PROMPT = """You are a senior technical writer at a software company.
 Your job is to write clear, structured product documentation based on Jira tickets.
 Always structure your document with these sections:
 1. Overview
 2. Technical Details
 3. Implementation Steps
 4. Acceptance Criteria
-5. Known Limitations"""
+5. Known Limitations
+Only state facts that are in the ticket or are standard engineering practice; if the ticket
+does not specify something, say so under Known Limitations instead of inventing it."""
 
-    user_prompt = f"""
-Write a complete technical document for this Jira ticket:
+
+def build_messages(ticket: dict) -> list:
+    """One prompt for every backend — the model is swappable, the contract is not."""
+    user_prompt = f"""Write a complete technical document for this Jira ticket:
 
 TICKET ID: {ticket['id']}
 TITLE: {ticket['title']}
 DESCRIPTION: {ticket['description']}
 STATUS: {ticket['status']}
+LABELS: {", ".join(ticket.get('labels') or []) or "none"}
 
-Generate a full, publication-ready technical document.
-"""
+Generate a full, publication-ready technical document in Markdown."""
+    return [{"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "user", "content": user_prompt}]
 
-    payload = {
-    "model": "google/gemini-2.0-flash-lite-001",
-    "messages": [
-        {"role": "system", "content": system_prompt},
-        {"role": "user", "content": user_prompt}
-    ]
-}
+
+def generate_document_openrouter(ticket: dict) -> str:
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json"
+    }
+    payload = {"model": OPENROUTER_MODEL, "messages": build_messages(ticket)}
 
     response = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
         headers=headers,
-        json=payload
+        json=payload,
+        timeout=120,
     )
 
     if response.status_code != 200:
@@ -54,38 +57,13 @@ Generate a full, publication-ready technical document.
 
 
 def generate_document_ollama(ticket: dict) -> str:
-    system_prompt = """You are a senior technical writer at a software company.
-Your job is to write clear, structured product documentation based on Jira tickets.
-Always structure your document with these sections:
-1. Overview
-2. Technical Details
-3. Implementation Steps
-4. Acceptance Criteria
-5. Known Limitations"""
-
-    user_prompt = f"""
-Write a complete technical document for this Jira ticket:
-
-TICKET ID: {ticket['id']}
-TITLE: {ticket['title']}
-DESCRIPTION: {ticket['description']}
-STATUS: {ticket['status']}
-
-Generate a full, publication-ready technical document.
-"""
-
-    payload = {
-        "model": "qwen2.5:latest",
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt}
-        ],
-        "stream": False
-    }
+    """Local, free, private — same prompt, different transport. Slow on CPU."""
+    payload = {"model": OLLAMA_MODEL, "messages": build_messages(ticket), "stream": False}
 
     response = requests.post(
         "http://localhost:11434/api/chat",
-        json=payload
+        json=payload,
+        timeout=600,
     )
 
     if response.status_code != 200:
