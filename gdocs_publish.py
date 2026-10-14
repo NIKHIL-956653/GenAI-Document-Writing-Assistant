@@ -4,6 +4,7 @@ from google.auth.transport.requests import Request
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from dotenv import load_dotenv
+from markdown_convert import markdown_to_docs
 
 load_dotenv()
 
@@ -38,9 +39,17 @@ def get_credentials():
 
 
 def create_google_doc(title: str, content: str, public: bool = False) -> str:
-    """Create a Doc with the content. Sharing is opt-in — internal docs stay private by default."""
+    """
+    Create a Doc with styled content. Sharing is opt-in — internal docs stay
+    private by default.
+
+    The Docs API has no markdown importer: you insert plain text, then style
+    it by character range. markdown_to_docs() does that mapping, and because
+    no styling request changes text length, the whole document lands in a
+    single batchUpdate.
+    """
     creds = get_credentials()
-    
+
     docs_service = build("docs", "v1", credentials=creds)
     drive_service = build("drive", "v3", credentials=creds)
 
@@ -52,20 +61,16 @@ def create_google_doc(title: str, content: str, public: bool = False) -> str:
     doc_id = doc["documentId"]
     print(f"Document created with ID: {doc_id}")
 
-    # Insert content
-    docs_service.documents().batchUpdate(
-        documentId=doc_id,
-        body={
-            "requests": [
-                {
-                    "insertText": {
-                        "location": {"index": 1},
-                        "text": content
-                    }
-                }
-            ]
-        }
-    ).execute()
+    plain_text, requests_body = markdown_to_docs(content)
+    if not requests_body:
+        print("Nothing to insert — document left empty")
+    else:
+        docs_service.documents().batchUpdate(
+            documentId=doc_id,
+            body={"requests": requests_body},
+        ).execute()
+        style_count = len(requests_body) - 1
+        print(f"Inserted {len(plain_text)} chars with {style_count} styling requests")
 
     if public:
         drive_service.permissions().create(

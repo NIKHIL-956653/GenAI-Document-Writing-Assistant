@@ -2,6 +2,12 @@ import requests
 import os
 from dotenv import load_dotenv
 
+from retry import request_with_retry
+
+# Populated after each OpenRouter call so main.py can report real token
+# counts and cost instead of guesses. Reset per call.
+LAST_USAGE = {}
+
 load_dotenv()
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
@@ -36,41 +42,65 @@ Generate a full, publication-ready technical document in Markdown."""
 
 
 def generate_document_openrouter(ticket: dict) -> str:
+    global LAST_USAGE
+    LAST_USAGE = {}
+
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
         "Content-Type": "application/json"
     }
     payload = {"model": OPENROUTER_MODEL, "messages": build_messages(ticket)}
 
-    response = requests.post(
+    response = request_with_retry(
+        "POST",
         "https://openrouter.ai/api/v1/chat/completions",
         headers=headers,
         json=payload,
         timeout=120,
+        label=f"openrouter {OPENROUTER_MODEL}",
     )
 
     if response.status_code != 200:
         print(f"Error: {response.status_code} — {response.text}")
         return ""
 
-    return response.json()["choices"][0]["message"]["content"]
+    data = response.json()
+    LAST_USAGE = {
+        "model": OPENROUTER_MODEL,
+        "prompt_tokens": data.get("usage", {}).get("prompt_tokens"),
+        "completion_tokens": data.get("usage", {}).get("completion_tokens"),
+        "total_tokens": data.get("usage", {}).get("total_tokens"),
+    }
+    return data["choices"][0]["message"]["content"]
 
 
 def generate_document_ollama(ticket: dict) -> str:
     """Local, free, private — same prompt, different transport. Slow on CPU."""
+    global LAST_USAGE
+    LAST_USAGE = {}
+
     payload = {"model": OLLAMA_MODEL, "messages": build_messages(ticket), "stream": False}
 
-    response = requests.post(
+    response = request_with_retry(
+        "POST",
         "http://localhost:11434/api/chat",
         json=payload,
         timeout=600,
+        label=f"ollama {OLLAMA_MODEL}",
     )
 
     if response.status_code != 200:
         print(f"Error: {response.status_code} — {response.text}")
         return ""
 
-    return response.json()["message"]["content"]
+    data = response.json()
+    LAST_USAGE = {
+        "model": OLLAMA_MODEL,
+        "prompt_tokens": data.get("prompt_eval_count"),
+        "completion_tokens": data.get("eval_count"),
+        "total_tokens": (data.get("prompt_eval_count") or 0) + (data.get("eval_count") or 0),
+    }
+    return data["message"]["content"]
 
 
 if __name__ == "__main__":
