@@ -4,6 +4,8 @@ from dotenv import load_dotenv
 import os
 import json
 
+from retry import request_with_retry
+
 load_dotenv()
 
 JIRA_DOMAIN = os.getenv("JIRA_DOMAIN")
@@ -40,11 +42,12 @@ def adf_to_text(node) -> str:
 def get_jira_ticket(ticket_id: str) -> dict:
     url = f"https://{JIRA_DOMAIN}/rest/api/3/issue/{ticket_id}"
     
-    response = requests.get(
-        url,
+    response = request_with_retry(
+        "GET", url,
         auth=HTTPBasicAuth(JIRA_EMAIL, JIRA_TOKEN),
         headers={"Accept": "application/json"},
         timeout=30,
+        label=f"jira {ticket_id}",
     )
     
     if response.status_code != 200:
