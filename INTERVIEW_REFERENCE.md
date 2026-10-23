@@ -20,20 +20,26 @@ in every company's tracker. The LLM part is the easy part — the value is in th
 ## 2. Architecture
 
 ```
-Jira Cloud ──REST v3──▶ jira_fetch.py ──dict──▶ llm_generate.py ──markdown──▶ main.py
-   (Basic auth:                (ADF → text)         (OpenRouter | Ollama)        │
-    email + API token)                                                          ├─▶ <ticket>_document.md
-                                                                                ├─▶ gdocs_publish.py   (OAuth 2.0, Docs + Drive API)
-                                                                                └─▶ confluence_publish.py (same Atlassian token, storage format)
+Jira Cloud ──REST v3──▶ docgen.jira ──Ticket──▶ docgen.llm ──GeneratedDocument──▶ docgen.pipeline
+   (Basic auth:            (ADF → text)          (OpenRouter | Ollama)                 │
+    email + API token)                                                                 ├─▶ <ticket>_document.md
+                                                                                       ├─▶ publishers.gdocs      (OAuth 2.0, Docs + Drive API)
+                                                                                       └─▶ publishers.confluence (same Atlassian token, storage format)
 ```
+
+Installable package (`src/docgen/`, `pip install -e .`, console entry point `docgen`). Every
+outbound call goes through `docgen.http.send()` (always with a timeout, failures → typed errors)
+and one `@retry` decorator.
 
 | Module | Responsibility | The one detail to know cold |
 |---|---|---|
-| `jira_fetch.py` | GET `/rest/api/3/issue/{key}`; normalise to `{id,title,description,status,labels}` | v3 returns `description` as **ADF** (a JSON tree), not text — `adf_to_text()` walks it |
-| `llm_generate.py` | `build_messages()` (one prompt) + two transports: OpenRouter, Ollama | System prompt pins the 5-section structure and tells the model to put unknowns under *Known Limitations* instead of inventing them |
-| `gdocs_publish.py` | OAuth installed-app flow → `documents.create` → `batchUpdate insertText` → optional Drive share | Insert index is `1` — index 0 is the document's start marker; sharing is opt-in |
-| `confluence_publish.py` | POST `/wiki/rest/api/content` with storage-format body | Body must be XHTML "storage" representation — markdown is not converted yet (limitation) |
-| `main.py` | CLI runner: `python main.py DEMO-2 --llm ollama --publish gdocs [--public]` | Saves locally *before* publishing so a publish failure never loses the generated doc |
+| `docgen.jira` | GET `/rest/api/3/issue/{key}`; normalise to a `Ticket` (Pydantic) | v3 returns `description` as **ADF** (a JSON tree), not text — `adf_to_text()` walks it |
+| `docgen.llm` | `build_messages()` (one prompt) + two backends: OpenRouter, Ollama | System prompt pins the 5-section structure and tells the model to put unknowns under *Known Limitations* instead of inventing them |
+| `docgen.publishers.gdocs` | OAuth installed-app flow → `documents.create` → one styled `batchUpdate` → optional Drive share | Write is pinned to the create's `revisionId`, so a retried write can't insert the text twice |
+| `docgen.publishers.confluence` | POST `/wiki/rest/api/content` with storage-format XHTML | Markdown → XHTML via `markdown_to_storage()` |
+| `docgen.retry` / `docgen.errors` | `@retry` decorator; typed error hierarchy | Rate limits (honour Retry-After, longer base) are handled differently from transient 5xx/timeouts (full-jitter backoff); auth/404/400 never retry |
+| `docgen.config` | Pydantic settings per integration; `preflight()` | Reports *every* missing env var before the first API call or token spent |
+| `docgen.cli` | `docgen DEMO-2 --llm ollama --publish gdocs [--public]` | Saves locally *before* publishing so a publish failure never loses the generated doc |
 
 ---
 
@@ -134,9 +140,11 @@ fractions of a cent. *(Measure it: the OpenRouter dashboard shows tokens per req
 real number.)*
 
 **"How does the Google token refresh work?"**
-`token.pickle` holds the credentials object. On start: load → if expired and a refresh token exists,
-`creds.refresh()` gets a new access token silently → else run the local-server consent flow →
-persist. The user consents once.
+`token.json` holds the authorized-user credentials (JSON, not pickle). On start: load → if expired
+and a refresh token exists, `creds.refresh()` gets a new access token silently → else run the
+local-server consent flow → persist. The user consents once. If the refresh token itself has been
+revoked or expired (7 days for apps in "Testing" status), the `RefreshError` becomes an `AuthError`
+telling the user to delete `token.json` and sign in again.
 
 **"Scale it to 1,000 tickets a day."**
 Batch by project, run generation concurrently (it's I/O-bound), respect each API's rate limits
@@ -151,23 +159,22 @@ product is "docs appear when tickets move," not "run a script."
 
 ## 7. Honest limitations (say them before they're found)
 
-- Markdown is inserted into Google Docs as plain text (no heading/bold styling) and wrapped in a
-  single `<p>` for Confluence. Roadmap: markdown → Docs `batchUpdate` styling requests; markdown → XHTML for Confluence.
-- No retries or backoff; one network error fails the run (the local save limits the damage).
-- No automated tests yet — `adf_to_text()` and `build_messages()` are pure functions and the first candidates.
+- Markdown styling covers headings, lists, bold, inline/fenced code — not tables or links in Google Docs.
+- Retries can re-send a non-idempotent call whose response was lost (an OpenRouter generation is
+  paid twice; a Confluence page create returns "already exists").
 - OAuth installed-app flow means it cannot run unattended on a server.
 - No PII redaction before the cloud LLM call.
-- Single ticket per run; no batch mode.
+- Batch mode is sequential; no concurrency yet.
 
 ---
 
 ## 8. Two-minute demo script
 
 1. Show the Jira ticket in the browser (title, a description with a bullet list — proves ADF handling).
-2. `python main.py DEMO-2` → narrate the four steps as they print.
+2. `docgen DEMO-2` → narrate the four steps as they print.
 3. Open the generated `DEMO-2_document.md` — point at the five sections and at *Known Limitations* naming something the ticket didn't specify.
-4. `python main.py DEMO-2 --publish gdocs` → the Doc opens in your Drive, private.
-5. If asked about privacy: `python main.py DEMO-2 --llm ollama` — same document, no internet call.
+4. `docgen DEMO-2 --publish gdocs` → the Doc opens in your Drive, private.
+5. If asked about privacy: `docgen DEMO-2 --llm ollama` — same document, no internet call.
 
 ---
 
@@ -176,4 +183,4 @@ product is "docs appear when tickets move," not "run a script."
 - Time for a full run, cloud: ____ s · local Ollama on CPU: ____ s
 - Tokens in / out for a typical ticket (OpenRouter dashboard): ____ / ____
 - Cost per document at current pricing: $____
-- Lines of code: ~350 Python across 5 modules
+- Lines of code: see `src/docgen/` (package) and `tests/`

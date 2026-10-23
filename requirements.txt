@@ -1,7 +1,2 @@
-requests
-python-dotenv
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
-markdown
-pytest
+# Dependencies live in pyproject.toml; this installs the package (and the `docgen` command).
+-e .[dev]

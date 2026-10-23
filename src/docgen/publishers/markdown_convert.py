@@ -10,7 +10,10 @@ Publishing raw markdown to either produces a document full of literal
 Both functions here are pure (no network), so they are unit-testable.
 """
 import html
+import logging
 import re
+
+log = logging.getLogger(__name__)
 
 # ── Google Docs ──────────────────────────────────────────────
 
@@ -216,8 +219,8 @@ def markdown_to_storage(markdown_text: str) -> str:
     try:
         import markdown as md
     except ImportError:
-        print("  [warn] `markdown` not installed — publishing as plain paragraphs. "
-              "Run: python -m pip install markdown")
+        log.warning("`markdown` not installed — publishing as plain paragraphs; "
+                    "run: python -m pip install markdown")
         paragraphs = [p.strip() for p in markdown_text.split("\n\n") if p.strip()]
         return "".join(f"<p>{html.escape(p)}</p>" for p in paragraphs)
 
