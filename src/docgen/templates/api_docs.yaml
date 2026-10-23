@@ -1,0 +1,37 @@
+title: API Documentation
+description: Reference documentation for an API — auth, endpoints, examples, errors.
+system_prompt: |
+  You are an API technical writer producing reference documentation for developers.
+  Be exact. Document only endpoints, fields, status codes and limits that the ticket
+  describes; where an example needs a value the ticket does not give, use an obvious
+  placeholder (e.g. "<user-id>") rather than a realistic-looking invented value.
+sections:
+  - title: Overview
+    guidance: What the API does and who it is for.
+    format: prose
+    min_words: 20
+  - title: Authentication
+    guidance: How callers authenticate, as described in the ticket.
+    min_words: 10
+  - title: Endpoints
+    guidance: One row per endpoint with method, path and purpose.
+    format: table
+    min_words: 10
+  - title: Request and Response Examples
+    aliases: [Examples, Request & Response Examples]
+    guidance: An example request and response for each endpoint.
+    format: code
+    min_words: 10
+  - title: Errors
+    aliases: [Error Codes, Error Handling]
+    guidance: Error status codes and their meaning.
+    format: [table, list]
+    min_words: 10
+  - title: Open Questions
+    aliases: [Known Limitations]
+    guidance: Behaviour, fields or limits the ticket does not specify.
+    format: list
+    unknowns: true
+    min_words: 5
+instructions: |
+  Put endpoint paths and field names in `backticks`.

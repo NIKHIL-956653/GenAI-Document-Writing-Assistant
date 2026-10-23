@@ -25,4 +25,4 @@ def get_publisher(name: str) -> Publisher:
     raise ValueError(f"unknown publish target {name!r}; choose from {', '.join(TARGETS)}")
 
 
-__all__ = ["Publisher", "TARGETS", "get_publisher"]
+__all__ = ["TARGETS", "Publisher", "get_publisher"]

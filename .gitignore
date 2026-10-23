@@ -26,3 +26,9 @@ _to_delete*/
 *.egg-info/
 build/
 dist/
+.coverage
+coverage.xml
+coverage-summary.md
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

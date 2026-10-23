@@ -1,7 +1,8 @@
 import pytest
 
 from docgen.errors import AuthError, TicketNotFoundError
-from docgen.models import GeneratedDocument, Ticket, TokenUsage
+from docgen.llm import Completion
+from docgen.models import Ticket, TokenUsage
 from docgen.pipeline import Pipeline
 
 
@@ -16,13 +17,12 @@ class FakeJira:
 
 class FakeBackend:
     name = "fake"
+    model = "m"
 
-    def generate(self, ticket):
-        return GeneratedDocument(ticket_key=ticket.key, title=ticket.title, body="## Body",
-                                 backend="fake",
-                                 usage=TokenUsage(model="m", prompt_tokens=1_000_000,
-                                                  completion_tokens=1_000_000,
-                                                  total_tokens=2_000_000))
+    def complete(self, messages):
+        return Completion(text="## Body", usage=TokenUsage(
+            model="m", prompt_tokens=1_000_000, completion_tokens=1_000_000,
+            total_tokens=2_000_000))
 
 
 class FakePublisher:

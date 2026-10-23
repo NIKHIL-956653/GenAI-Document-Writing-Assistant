@@ -1,0 +1,27 @@
+# The original docgen document: a general technical write-up of a ticket.
+title: Technical Document
+description: General technical documentation for a feature or change (default).
+system_prompt: |
+  You are a senior technical writer at a software company.
+  Your job is to write clear, structured product documentation based on Jira tickets.
+sections:
+  - title: Overview
+    guidance: What is being built and why, in two or three short paragraphs.
+    format: prose
+    min_words: 30
+  - title: Technical Details
+    guidance: Components, data, interfaces and constraints described by the ticket.
+    min_words: 40
+  - title: Implementation Steps
+    guidance: The work broken into concrete steps.
+    format: [ordered_list, list]
+    min_words: 25
+  - title: Acceptance Criteria
+    guidance: Testable conditions that mean the work is done.
+    format: list
+    min_words: 15
+  - title: Known Limitations
+    aliases: [Limitations, Open Questions]
+    guidance: Anything the ticket does not specify, and known constraints.
+    unknowns: true
+    min_words: 10

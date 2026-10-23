@@ -42,7 +42,7 @@ def test_google_socket_timeout_is_transient():
 
 
 def test_missing_oauth_client_file_is_config_error():
-    with pytest.raises(ConfigError, match="credentials.json"):
+    with pytest.raises(ConfigError, match=r"credentials\.json"):
         GoogleDocsPublisher().credentials()
 
 

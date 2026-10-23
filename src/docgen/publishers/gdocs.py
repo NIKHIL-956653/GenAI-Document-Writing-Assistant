@@ -14,6 +14,7 @@ rejected by Google instead of inserting the text a second time.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 import httplib2
 from google.auth.exceptions import RefreshError, TransportError
@@ -25,8 +26,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
 from docgen.config import GoogleSettings, load
-from docgen.errors import (APIError, AuthError, ConfigError, DocgenError, RateLimitError,
-                           TransientError)
+from docgen.errors import APIError, AuthError, ConfigError, DocgenError, RateLimitError, TransientError
 from docgen.http import parse_retry_after
 from docgen.models import GeneratedDocument
 from docgen.publishers.markdown_convert import markdown_to_docs
@@ -93,7 +93,9 @@ class GoogleDocsPublisher:
         creds = None
         if token_file.exists():
             try:
-                creds = Credentials.from_authorized_user_file(str(token_file), SCOPES)
+                # No scopes argument: it would overwrite the token's stored scopes and make
+                # the has_scopes() check below always pass.
+                creds = Credentials.from_authorized_user_file(str(token_file))
             except (ValueError, KeyError) as exc:
                 log.warning("ignoring unreadable token file", extra={"path": str(token_file),
                                                                      "error": str(exc)})
@@ -155,7 +157,7 @@ class GoogleDocsPublisher:
     @retry()
     def _write(self, doc_id: str, revision_id: str | None, requests_body: list) -> None:
         docs, _ = self._services()
-        body = {"requests": requests_body}
+        body: dict[str, Any] = {"requests": requests_body}
         if revision_id:
             body["writeControl"] = {"requiredRevisionId": revision_id}
         _execute(docs.documents().batchUpdate(documentId=doc_id, body=body),

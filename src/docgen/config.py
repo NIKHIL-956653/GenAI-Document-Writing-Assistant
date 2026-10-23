@@ -112,22 +112,35 @@ def load(settings_cls: type[S]) -> S:
         raise ConfigError(". ".join(parts), hint=ENV_HINT) from None
 
 
+def _problems(settings_classes: list[type[BaseSettings]]) -> list[str]:
+    problems = []
+    for settings_cls in dict.fromkeys(settings_classes):  # de-duplicated, order kept
+        try:
+            load(settings_cls)
+        except ConfigError as exc:
+            problems.append(exc.message)
+    return problems
+
+
+def _raise_if(problems: list[str]) -> None:
+    if problems:
+        raise ConfigError("Configuration problems:\n  - " + "\n  - ".join(problems),
+                          hint=ENV_HINT)
+
+
+def llm_settings(backend: str) -> type[BaseSettings]:
+    return OpenRouterSettings if backend == "openrouter" else OllamaSettings
+
+
 def preflight(llm: str, publish: str) -> None:
     """
     Validate every setting this run needs, and report all problems at once.
     Raises ConfigError; returns None when the run is good to go.
     """
-    problems: list[str] = []
-    needed: list[type[BaseSettings]] = [JiraSettings]
-    needed.append(OpenRouterSettings if llm == "openrouter" else OllamaSettings)
+    needed: list[type[BaseSettings]] = [JiraSettings, llm_settings(llm)]
     if publish == "confluence":
         needed.append(ConfluenceSettings)
-
-    for settings_cls in needed:
-        try:
-            load(settings_cls)
-        except ConfigError as exc:
-            problems.append(exc.message)
+    problems = _problems(needed)
 
     if publish == "gdocs":
         try:
@@ -141,7 +154,9 @@ def preflight(llm: str, publish: str) -> None:
                     "Download an OAuth 2.0 'Desktop app' client from Google Cloud Console "
                     "(APIs & Services → Credentials) and save it there, or set GOOGLE_CREDENTIALS_FILE"
                 )
+    _raise_if(problems)
 
-    if problems:
-        raise ConfigError("Configuration problems:\n  - " + "\n  - ".join(problems),
-                          hint=ENV_HINT)
+
+def preflight_backends(backends: list[str]) -> None:
+    """For `docgen eval`: only the LLM settings matter (fixtures replace Jira)."""
+    _raise_if(_problems([llm_settings(b) for b in backends]))

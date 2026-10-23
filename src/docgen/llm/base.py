@@ -3,10 +3,20 @@ from __future__ import annotations
 
 from typing import Protocol
 
-from docgen.models import GeneratedDocument, Ticket
+from pydantic import BaseModel
+
+from docgen.models import TokenUsage
+
+
+class Completion(BaseModel):
+    text: str
+    usage: TokenUsage
 
 
 class Backend(Protocol):
     name: str
 
-    def generate(self, ticket: Ticket) -> GeneratedDocument: ...
+    @property
+    def model(self) -> str: ...
+
+    def complete(self, messages: list[dict]) -> Completion: ...

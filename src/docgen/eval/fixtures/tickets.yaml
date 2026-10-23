@@ -1,0 +1,90 @@
+# Fixture tickets for `docgen eval`. Each runs through the pipeline with the
+# template named here, and the output is scored against this ticket.
+# Add cases freely: id, template, and a ticket (key, title, description,
+# optional status / labels).
+- id: login-jwt
+  template: technical
+  ticket:
+    key: EVAL-1
+    title: Build secure login system with JWT
+    status: To Do
+    labels: [auth, backend]
+    description: |
+      Users need to log in with email and password.
+      - Endpoint: POST /api/login returns an access token (JWT) on success.
+      - Access tokens expire after 15 minutes.
+      - Lock the account for 30 minutes after 5 consecutive failed attempts.
+      - Passwords must never be logged.
+      Out of scope: social login, password reset.
+
+- id: bulk-export-prd
+  template: prd
+  ticket:
+    key: EVAL-2
+    title: Bulk CSV export for the reports page
+    status: Backlog
+    labels: [reports, customer-request]
+    description: |
+      Enterprise customers keep asking support to export report data; 40 tickets
+      last quarter. Admins should be able to export any report as CSV from the
+      reports page. Exports over 100,000 rows run in the background and the admin
+      gets an email with a download link that is valid for 24 hours.
+      Only users with the Admin role can export.
+      Goal: cut export-related support tickets by half.
+
+- id: db-failover-runbook
+  template: runbook
+  ticket:
+    key: EVAL-3
+    title: Runbook for failing over the orders database
+    status: In Progress
+    labels: [ops, database]
+    description: |
+      The orders service uses a primary/replica PostgreSQL pair. When the primary
+      is unhealthy, on-call promotes the replica with `pg_ctl promote`, updates the
+      ORDERS_DB_HOST config value to the replica host, and restarts the orders
+      service. Verify with the /healthz endpoint returning 200. Rolling back means
+      re-pointing ORDERS_DB_HOST at the old primary once it is rebuilt.
+      Escalate to the database team if promotion fails.
+
+- id: release-2-4
+  template: release_notes
+  ticket:
+    key: EVAL-4
+    title: Release notes for version 2.4
+    status: Done
+    labels: [release]
+    description: |
+      Version 2.4 adds dark mode to the web app and lets users pin up to 10
+      dashboards. Search is now about twice as fast on large workspaces.
+      The legacy v1 export endpoint is removed; integrations must move to
+      /api/v2/exports. Known issue: dark mode does not apply to emailed reports yet.
+
+- id: webhooks-api
+  template: api_docs
+  ticket:
+    key: EVAL-5
+    title: Document the webhooks API
+    status: In Review
+    labels: [api, docs]
+    description: |
+      Customers register webhooks with POST /v1/webhooks (body: url, events[]) and
+      list them with GET /v1/webhooks. DELETE /v1/webhooks/{id} removes one.
+      Requests authenticate with a bearer API key. Each delivery is signed with an
+      HMAC-SHA256 signature in the X-Signature header. Invalid URLs return 422.
+      Limit: 20 webhooks per account.
+
+- id: checkout-outage-postmortem
+  template: postmortem
+  ticket:
+    key: EVAL-6
+    title: Postmortem — checkout outage on 12 March
+    status: Done
+    labels: [incident, sev1]
+    description: |
+      Checkout returned errors for 47 minutes, from 14:05 to 14:52 UTC.
+      Roughly 3,200 orders failed. A config change set the payment provider timeout
+      to 500ms (previously 5s), so most payment calls timed out. The on-call engineer
+      rolled the config back at 14:48 and errors cleared by 14:52.
+      Follow-ups: add validation for timeout config values, and alert on checkout
+      error rate.

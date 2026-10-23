@@ -1,19 +1,14 @@
 """OpenRouter (OpenAI-compatible chat completions) backend."""
 from __future__ import annotations
 
-import logging
-
 import requests
 
 from docgen import http
 from docgen.config import OpenRouterSettings, load
-from docgen.errors import (APIError, AuthError, DocgenError, RateLimitError,
-                           TransientError)
-from docgen.llm.prompt import build_messages
-from docgen.models import GeneratedDocument, Ticket, TokenUsage
+from docgen.errors import APIError, AuthError, DocgenError, RateLimitError, TransientError
+from docgen.llm.base import Completion
+from docgen.models import TokenUsage
 from docgen.retry import retry
-
-log = logging.getLogger(__name__)
 
 SERVICE = "openrouter"
 
@@ -52,15 +47,20 @@ class OpenRouterBackend:
     def __init__(self, settings: OpenRouterSettings | None = None):
         self.settings = settings or load(OpenRouterSettings)
 
+    @property
+    def model(self) -> str:
+        return self.settings.model
+
     @retry()
-    def generate(self, ticket: Ticket) -> GeneratedDocument:
+    def complete(self, messages: list[dict]) -> Completion:
         model = self.settings.model
         response = http.send(
             "POST", f"{self.settings.base_url}/chat/completions",
             service=SERVICE, timeout=self.settings.timeout,
             headers={"Authorization": f"Bearer {self.settings.api_key.get_secret_value()}",
                      "Content-Type": "application/json"},
-            json={"model": model, "messages": build_messages(ticket)},
+            # usage.include asks OpenRouter to report the billed cost alongside token counts
+            json={"model": model, "messages": messages, "usage": {"include": True}},
             on_status=_status_error,
         )
         try:
@@ -72,20 +72,17 @@ class OpenRouterBackend:
             raise err
 
         try:
-            body = data["choices"][0]["message"]["content"]
+            text = data["choices"][0]["message"]["content"]
         except (KeyError, IndexError, TypeError) as exc:
             raise TransientError("openrouter response had no completion",
                                  service=SERVICE) from exc
-        if not body or not body.strip():
+        if not text or not text.strip():
             raise TransientError("openrouter returned an empty completion", service=SERVICE)
 
         raw = data.get("usage") or {}
         usage = TokenUsage(model=model,
                            prompt_tokens=raw.get("prompt_tokens"),
                            completion_tokens=raw.get("completion_tokens"),
-                           total_tokens=raw.get("total_tokens"))
-        log.info("document generated", extra={"ticket": ticket.key, "backend": self.name,
-                                              "model": model, "chars": len(body),
-                                              "tokens": usage.total_tokens})
-        return GeneratedDocument(ticket_key=ticket.key, title=ticket.title, body=body,
-                                 backend=self.name, usage=usage)
+                           total_tokens=raw.get("total_tokens"),
+                           cost_usd=raw.get("cost"))
+        return Completion(text=text, usage=usage)

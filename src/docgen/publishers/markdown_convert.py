@@ -137,10 +137,7 @@ def markdown_to_docs(markdown_text: str):
 
         # Group consecutive list items so each run becomes one list
         if is_list:
-            if current_bullets is None:
-                current_bullets = (start, offset)
-            else:
-                current_bullets = (current_bullets[0], offset)
+            current_bullets = (start if current_bullets is None else current_bullets[0], offset)
         elif current_bullets:
             bullet_runs.append(current_bullets)
             current_bullets = None

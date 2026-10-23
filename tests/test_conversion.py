@@ -1,18 +1,11 @@
 """
 Unit tests for the pure logic — no network, no API keys, no Jira.
 
-These cover the three places where bugs actually bit: ADF parsing (Jira v3
-returns a JSON tree, not a string), the prompt contract shared by both LLM
-backends, and the markdown conversion that stops published docs showing
-literal "## " characters.
+ADF parsing (Jira v3 returns a JSON tree, not a string) and the markdown
+conversion that stops published docs showing literal "## " characters.
 """
-import pytest
-
 from docgen.jira import adf_to_text
-from docgen.llm import build_messages
-from docgen.models import Ticket
 from docgen.publishers.markdown_convert import markdown_to_docs, markdown_to_storage
-
 
 # ── adf_to_text ──────────────────────────────────────────────
 
@@ -74,45 +67,6 @@ def test_adf_unknown_node_still_returns_children():
         "content": [{"type": "text", "text": "kept"}],
     }
     assert adf_to_text(node) == "kept"
-
-
-# ── build_messages ───────────────────────────────────────────
-
-@pytest.fixture
-def ticket():
-    return Ticket(
-        key="DEMO-1",
-        title="Build secure login system with JWT",
-        description="Users need to authenticate with email and password.",
-        status="To Do",
-        labels=["auth", "backend"],
-    )
-
-
-def test_build_messages_shape(ticket):
-    messages = build_messages(ticket)
-    assert len(messages) == 2
-    assert messages[0]["role"] == "system"
-    assert messages[1]["role"] == "user"
-
-
-def test_build_messages_includes_every_ticket_field(ticket):
-    user_content = build_messages(ticket)[1]["content"]
-    assert "DEMO-1" in user_content
-    assert "Build secure login system with JWT" in user_content
-    assert "email and password" in user_content
-    assert "To Do" in user_content
-    assert "auth, backend" in user_content
-
-
-def test_build_messages_handles_missing_labels(ticket):
-    ticket = ticket.model_copy(update={"labels": []})
-    assert "none" in build_messages(ticket)[1]["content"]
-
-
-def test_system_prompt_constrains_hallucination(ticket):
-    system = build_messages(ticket)[0]["content"]
-    assert "Known Limitations" in system
 
 
 # ── markdown_to_docs ─────────────────────────────────────────

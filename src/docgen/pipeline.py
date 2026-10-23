@@ -16,9 +16,10 @@ from pathlib import Path
 
 from docgen.errors import AuthError, ConfigError, DocgenError
 from docgen.jira import JiraClient
-from docgen.llm import Backend, get_backend
+from docgen.llm import Backend, generate, get_backend
 from docgen.models import RunResult
 from docgen.publishers import Publisher, get_publisher
+from docgen.templates import DEFAULT_TEMPLATE, Template, load_template
 
 log = logging.getLogger(__name__)
 
@@ -26,6 +27,12 @@ log = logging.getLogger(__name__)
 # Override with --price-in / --price-out when you switch models.
 DEFAULT_PRICE_IN = 0.075
 DEFAULT_PRICE_OUT = 0.30
+
+
+def output_filename(key: str, template: str) -> str:
+    """DEMO-2_document.md for the default template, DEMO-2_runbook_document.md otherwise."""
+    suffix = "" if template == DEFAULT_TEMPLATE else f"_{template}"
+    return f"{key}{suffix}_document.md"
 
 
 def confirm(prompt: str) -> bool:
@@ -43,6 +50,7 @@ class Pipeline:
     def __init__(
         self,
         llm: str = "openrouter",
+        template: Template | None = None,
         publish: str = "none",
         public: bool = False,
         review: bool = False,
@@ -51,6 +59,7 @@ class Pipeline:
         output_dir: Path = Path("."),
     ):
         self.llm = llm
+        self.template = template or load_template(DEFAULT_TEMPLATE)
         self.publish = publish
         self.public = public
         self.review = review
@@ -95,14 +104,15 @@ class Pipeline:
         log.info("fetching ticket", extra={"ticket": key})
         ticket = self.jira.get_ticket(key)
 
-        log.info("generating document", extra={"ticket": key, "backend": self.llm})
-        document = self.backend.generate(ticket)
+        log.info("generating document", extra={"ticket": key, "backend": self.llm,
+                                               "template": self.template.name})
+        document = generate(self.backend, ticket, self.template)
         result.chars = len(document.body)
         result.usage = document.usage
         result.cost = document.usage.cost(self.price_in, self.price_out)
 
         # Save locally before any publish can fail, so a generated doc is never lost.
-        path = self.output_dir / f"{ticket.key}_document.md"
+        path = self.output_dir / output_filename(ticket.key, self.template.name)
         path.write_text(document.to_markdown(), encoding="utf-8")
         log.info("saved", extra={"ticket": key, "path": str(path), "chars": result.chars,
                                  "tokens": document.usage.total_tokens,

@@ -47,9 +47,16 @@ class TokenUsage(BaseModel):
     prompt_tokens: int | None = None
     completion_tokens: int | None = None
     total_tokens: int | None = None
+    # Billed cost when the provider reports it (OpenRouter), 0.0 for local models.
+    cost_usd: float | None = None
 
     def cost(self, price_in: float, price_out: float) -> float | None:
-        """USD from per-1M-token prices, or None if the backend gave no counts."""
+        """
+        USD for this call: the provider-reported cost when there is one, otherwise an
+        estimate from per-1M-token prices, or None if there are no token counts either.
+        """
+        if self.cost_usd is not None:
+            return self.cost_usd
         if self.prompt_tokens is None or self.completion_tokens is None:
             return None
         return (self.prompt_tokens / 1_000_000 * price_in
@@ -60,6 +67,7 @@ class GeneratedDocument(BaseModel):
     ticket_key: str
     title: str
     body: str = Field(description="Markdown produced by the LLM")
+    template: str = "technical"
     backend: str
     usage: TokenUsage
 

@@ -1,6 +1,6 @@
 import pytest
 
-from docgen.errors import (APIError, AuthError, RateLimitError, TransientError)
+from docgen.errors import APIError, AuthError, RateLimitError, TransientError
 from docgen.http import parse_retry_after
 from docgen.retry import backoff_delay, retry
 
