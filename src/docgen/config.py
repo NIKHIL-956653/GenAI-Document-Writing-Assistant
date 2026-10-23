@@ -112,22 +112,35 @@ def load(settings_cls: type[S]) -> S:
         raise ConfigError(". ".join(parts), hint=ENV_HINT) from None
 
 
+def _problems(settings_classes: list[type[BaseSettings]]) -> list[str]:
+    problems = []
+    for settings_cls in dict.fromkeys(settings_classes):  # de-duplicated, order kept
+        try:
+            load(settings_cls)
+        except ConfigError as exc:
+            problems.append(exc.message)
+    return problems
+
+
+def _raise_if(problems: list[str]) -> None:
+    if problems:
+        raise ConfigError("Configuration problems:\n  - " + "\n  - ".join(problems),
+                          hint=ENV_HINT)
+
+
+def llm_settings(backend: str) -> type[BaseSettings]:
+    return OpenRouterSettings if backend == "openrouter" else OllamaSettings
+
+
 def preflight(llm: str, publish: str) -> None:
     """
     Validate every setting this run needs, and report all problems at once.
     Raises ConfigError; returns None when the run is good to go.
     """
-    problems: list[str] = []
-    needed: list[type[BaseSettings]] = [JiraSettings]
-    needed.append(OpenRouterSettings if llm == "openrouter" else OllamaSettings)
+    needed: list[type[BaseSettings]] = [JiraSettings, llm_settings(llm)]
     if publish == "confluence":
         needed.append(ConfluenceSettings)
-
-    for settings_cls in needed:
-        try:
-            load(settings_cls)
-        except ConfigError as exc:
-            problems.append(exc.message)
+    problems = _problems(needed)
 
     if publish == "gdocs":
         try:
@@ -141,7 +154,49 @@ def preflight(llm: str, publish: str) -> None:
                     "Download an OAuth 2.0 'Desktop app' client from Google Cloud Console "
                     "(APIs & Services → Credentials) and save it there, or set GOOGLE_CREDENTIALS_FILE"
                 )
+    _raise_if(problems)
 
-    if problems:
-        raise ConfigError("Configuration problems:\n  - " + "\n  - ".join(problems),
-                          hint=ENV_HINT)
+
+def preflight_backends(backends: list[str]) -> None:
+    """For `docgen eval`: only the LLM settings matter (fixtures replace Jira)."""
+    _raise_if(_problems([llm_settings(b) for b in backends]))
+
+
+class DocgenSettings(_Settings):
+    """docgen's own settings: the store, and the HTTP server's defaults (`docgen serve`)."""
+    model_config = SettingsConfigDict(env_prefix="DOCGEN_")
+
+    store: Path = Path(".docgen") / "docgen.db"
+    output_dir: Path = Path(".")
+    # server: what a request gets when it doesn't say
+    llm: str = "openrouter"
+    model: str | None = None
+    template: str = "technical"
+    context: str = "standard"
+    concurrency: int = Field(default=4, ge=1, le=32)
+    workers: int = Field(default=2, ge=1, le=16)    # jobs running at once
+    api_token: SecretStr | None = None              # Bearer token for the API; unset = open
+    # Jira webhook: generate when an issue moves into one of these statuses
+    webhook_secret: SecretStr | None = None
+    webhook_statuses: str = "Done"                  # comma-separated, case-insensitive
+    webhook_template: str | None = None             # default: `template`
+    webhook_publish: str = "none"                   # none | gdocs | confluence
+    webhook_public: bool = False
+
+    @field_validator("llm")
+    @classmethod
+    def _known_llm(cls, value: str) -> str:
+        if value not in ("openrouter", "ollama"):
+            raise ValueError("must be openrouter or ollama")
+        return value
+
+    @field_validator("webhook_publish")
+    @classmethod
+    def _known_target(cls, value: str) -> str:
+        if value not in ("none", "gdocs", "confluence"):
+            raise ValueError("must be none, gdocs or confluence")
+        return value
+
+    @property
+    def statuses(self) -> set[str]:
+        return {s.strip().casefold() for s in self.webhook_statuses.split(",") if s.strip()}

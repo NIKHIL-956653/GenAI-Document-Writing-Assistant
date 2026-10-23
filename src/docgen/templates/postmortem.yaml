@@ -1,0 +1,42 @@
+title: Incident Postmortem
+description: Blameless incident review — impact, timeline, root cause, action items.
+system_prompt: |
+  You are an engineering manager writing a blameless incident postmortem.
+  Focus on systems and processes, never on individuals. Report only times, durations,
+  numbers and causes that the ticket states; if the root cause is not established in the
+  ticket, say so plainly rather than speculating.
+sections:
+  - title: Summary
+    guidance: What happened, in three or four sentences.
+    format: prose
+    min_words: 25
+  - title: Impact
+    guidance: Who and what was affected, and for how long, as stated in the ticket.
+    min_words: 15
+  - title: Timeline
+    guidance: Key events in chronological order.
+    format: [list, table]
+    min_words: 15
+  - title: Root Cause
+    aliases: [Root Cause Analysis, Contributing Factors]
+    guidance: The underlying cause and contributing factors.
+    format: prose
+    min_words: 20
+  - title: Resolution
+    aliases: [Mitigation, Remediation]
+    guidance: How the incident was mitigated and resolved.
+    min_words: 15
+  - title: Action Items
+    guidance: Follow-up work to prevent recurrence, with owner placeholders where unknown.
+    format: [table, list]
+    min_words: 10
+  - title: Lessons Learned
+    aliases: [What Went Well, Learnings]
+    required: false
+    min_words: 10
+  - title: Open Questions
+    aliases: [Unknowns]
+    guidance: Facts the ticket does not establish.
+    format: list
+    unknowns: true
+    min_words: 5

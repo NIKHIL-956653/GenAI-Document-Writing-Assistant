@@ -1,12 +1,13 @@
 import pytest
 
 from docgen.errors import AuthError, TicketNotFoundError
-from docgen.models import GeneratedDocument, Ticket, TokenUsage
+from docgen.llm import Completion
+from docgen.models import Published, Ticket, TokenUsage
 from docgen.pipeline import Pipeline
 
 
 class FakeJira:
-    def get_ticket(self, key):
+    def get_ticket(self, key, context=None):
         if key == "DEMO-404":
             raise TicketNotFoundError("Ticket DEMO-404 was not found")
         if key == "DEMO-401":
@@ -16,13 +17,12 @@ class FakeJira:
 
 class FakeBackend:
     name = "fake"
+    model = "m"
 
-    def generate(self, ticket):
-        return GeneratedDocument(ticket_key=ticket.key, title=ticket.title, body="## Body",
-                                 backend="fake",
-                                 usage=TokenUsage(model="m", prompt_tokens=1_000_000,
-                                                  completion_tokens=1_000_000,
-                                                  total_tokens=2_000_000))
+    def complete(self, messages):
+        return Completion(text="## Body", usage=TokenUsage(
+            model="m", prompt_tokens=1_000_000, completion_tokens=1_000_000,
+            total_tokens=2_000_000))
 
 
 class FakePublisher:
@@ -31,9 +31,10 @@ class FakePublisher:
     def __init__(self):
         self.published = []
 
-    def publish(self, document, *, public=False):
+    def publish(self, document, *, public=False, existing_id=None):
         self.published.append(document.ticket_key)
-        return f"https://docs.test/{document.ticket_key}"
+        return Published(target="gdocs", external_id=document.ticket_key,
+                         url=f"https://docs.test/{document.ticket_key}", created=existing_id is None)
 
 
 def make_pipeline(tmp_path, **kwargs):
@@ -45,7 +46,7 @@ def make_pipeline(tmp_path, **kwargs):
 def test_saves_document_and_reports_cost(tmp_path):
     [result] = make_pipeline(tmp_path).run(["DEMO-1"])
     assert result.ok and result.cost == pytest.approx(3.0)
-    assert (tmp_path / "DEMO-1_document.md").read_text() == "# Title DEMO-1\n\n## Body"
+    assert (tmp_path / "DEMO-1_document.md").read_text() == "# Title DEMO-1\n\n## Body\n"
 
 
 def test_one_bad_ticket_does_not_stop_the_batch(tmp_path):

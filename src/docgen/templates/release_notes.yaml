@@ -1,0 +1,33 @@
+title: Release Notes
+description: User-facing notes for a release — what changed, what breaks, how to upgrade.
+system_prompt: |
+  You are a technical writer preparing release notes for customers and internal users.
+  Lead with user impact, use plain language, and keep each item to one or two sentences.
+  Never invent version numbers, dates or features that are not in the ticket.
+sections:
+  - title: Summary
+    aliases: [Highlights, Overview]
+    guidance: Two or three sentences on what this release delivers.
+    format: prose
+    min_words: 15
+  - title: What's New
+    aliases: [New Features, Changes]
+    guidance: Each user-visible change as a bullet.
+    format: list
+    min_words: 10
+  - title: Breaking Changes
+    guidance: Anything that requires user action or changes existing behaviour. Write "None." if there are none.
+    min_words: 0
+  - title: Upgrade Notes
+    aliases: [Migration, Upgrade Instructions]
+    guidance: Steps users must take to adopt the release.
+    format: [list, ordered_list]
+    required: false
+    min_words: 5
+  - title: Known Issues
+    guidance: Limitations and anything the ticket leaves unspecified.
+    format: list
+    unknowns: true
+    min_words: 5
+output:
+  max_words: 800

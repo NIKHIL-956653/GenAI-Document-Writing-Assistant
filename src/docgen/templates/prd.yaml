@@ -1,0 +1,41 @@
+title: Product Requirements Document
+description: What to build and why — problem, goals, user stories, requirements, metrics.
+system_prompt: |
+  You are a senior product manager writing a product requirements document (PRD).
+  You write for engineers, designers and stakeholders: precise, outcome-focused, and
+  free of implementation detail unless the ticket prescribes it.
+sections:
+  - title: Problem Statement
+    aliases: [Problem, Background]
+    guidance: The user or business problem, who has it, and why it matters now.
+    format: prose
+    min_words: 30
+  - title: Goals
+    guidance: The outcomes this work must achieve.
+    format: list
+    min_words: 10
+  - title: Non-Goals
+    aliases: [Out of Scope]
+    guidance: What is explicitly not being addressed.
+    format: list
+    required: false
+    min_words: 5
+  - title: User Stories
+    guidance: "\"As a <user>, I want <capability>, so that <benefit>\" for each user type."
+    format: list
+    min_words: 20
+  - title: Requirements
+    aliases: [Functional Requirements]
+    guidance: Functional and non-functional requirements, each testable.
+    format: [list, table]
+    min_words: 25
+  - title: Success Metrics
+    aliases: [Metrics, KPIs]
+    guidance: How success will be measured. Only use targets stated in the ticket.
+    format: list
+    min_words: 10
+  - title: Open Questions
+    guidance: Decisions and details the ticket leaves unresolved.
+    format: list
+    unknowns: true
+    min_words: 5

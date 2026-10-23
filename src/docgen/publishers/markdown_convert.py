@@ -12,6 +12,9 @@ Both functions here are pure (no network), so they are unit-testable.
 import html
 import logging
 import re
+from typing import NamedTuple
+
+from docgen.assets import IMAGE_LINE_RE
 
 log = logging.getLogger(__name__)
 
@@ -24,6 +27,7 @@ HEADING_STYLES = {
 
 BULLET_RE = re.compile(r"^[-*+]\s+")
 ORDERED_RE = re.compile(r"^\d+[.)]\s+")
+STORAGE_IMG_RE = re.compile(r'<img alt="(?P<alt>[^"]*)" src="attachment:(?P<name>[^"]+)" ?/?>')
 HR_RE = re.compile(r"^\s*([-*_])\s*(\1\s*){2,}$")
 
 
@@ -64,6 +68,13 @@ def _parse_inline(text: str, offset: int):
     return "".join(out), styles
 
 
+class ImageSlot(NamedTuple):
+    """An empty paragraph left in the text where an image goes (document index)."""
+    position: int
+    filename: str
+    caption: str
+
+
 def markdown_to_docs(markdown_text: str):
     """
     Returns (plain_text, requests).
@@ -72,9 +83,19 @@ def markdown_to_docs(markdown_text: str):
     it. No styling request changes text length, so every index stays valid
     inside one batchUpdate.
     """
+    plain_text, requests, _ = markdown_to_docs_with_images(markdown_text)
+    return plain_text, requests
+
+
+def markdown_to_docs_with_images(markdown_text: str) -> tuple[str, list, list[ImageSlot]]:
+    """
+    Like markdown_to_docs, plus the slots where `![caption](attachment:FILE)`
+    lines were. Images are inserted after the text, in descending index order,
+    so each insertion leaves the earlier slots' indices valid.
+    """
     # Nothing but whitespace means nothing to publish — bail before building requests
     if not markdown_text or not markdown_text.strip():
-        return "", []
+        return "", [], []
 
     plain_parts = []
     offset = 0           # offset within plain text (doc index = offset + 1)
@@ -83,6 +104,7 @@ def markdown_to_docs(markdown_text: str):
     bullet_runs = []     # (start, end) of consecutive list paragraphs
     code_blocks = []     # (start, end)
 
+    images: list[ImageSlot] = []
     current_bullets = None
     in_fence = False
 
@@ -107,6 +129,15 @@ def markdown_to_docs(markdown_text: str):
 
         # Horizontal rules carry no meaning in a Doc — drop them
         if HR_RE.match(line):
+            continue
+
+        if image := IMAGE_LINE_RE.match(line):
+            images.append(ImageSlot(position=offset + 1, filename=image.group(2), caption=image.group(1)))
+            plain_parts.append("\n")
+            offset += 1
+            if current_bullets:
+                bullet_runs.append(current_bullets)
+                current_bullets = None
             continue
 
         is_list = False
@@ -137,10 +168,7 @@ def markdown_to_docs(markdown_text: str):
 
         # Group consecutive list items so each run becomes one list
         if is_list:
-            if current_bullets is None:
-                current_bullets = (start, offset)
-            else:
-                current_bullets = (current_bullets[0], offset)
+            current_bullets = (start if current_bullets is None else current_bullets[0], offset)
         elif current_bullets:
             bullet_runs.append(current_bullets)
             current_bullets = None
@@ -150,7 +178,7 @@ def markdown_to_docs(markdown_text: str):
 
     plain_text = "".join(plain_parts)
     if not plain_text:
-        return "", []
+        return "", [], []
 
     requests = [{
         "insertText": {"location": {"index": 1}, "text": plain_text}
@@ -202,7 +230,7 @@ def markdown_to_docs(markdown_text: str):
                 }
             })
 
-    return plain_text, requests
+    return plain_text, requests, images
 
 
 # ── Confluence ───────────────────────────────────────────────
@@ -224,7 +252,12 @@ def markdown_to_storage(markdown_text: str) -> str:
         paragraphs = [p.strip() for p in markdown_text.split("\n\n") if p.strip()]
         return "".join(f"<p>{html.escape(p)}</p>" for p in paragraphs)
 
-    return md.markdown(
+    rendered = md.markdown(
         markdown_text,
         extensions=["fenced_code", "tables", "sane_lists"],
     )
+    # Ticket images are uploaded as page attachments; reference them by filename.
+    return STORAGE_IMG_RE.sub(
+        lambda m: (f'<ac:image ac:alt="{m.group("alt")}">'
+                   f'<ri:attachment ri:filename="{m.group("name")}" /></ac:image>'),
+        rendered)

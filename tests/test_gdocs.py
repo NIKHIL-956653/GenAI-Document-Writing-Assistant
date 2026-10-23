@@ -6,7 +6,7 @@ from google.auth.exceptions import RefreshError
 from googleapiclient.errors import HttpError
 
 from docgen.errors import APIError, AuthError, ConfigError, RateLimitError, TransientError
-from docgen.publishers.gdocs import GoogleDocsPublisher, classify_google_error
+from docgen.publishers.gdocs import SCOPES, GoogleDocsPublisher, classify_google_error
 
 
 def http_error(status, reason="", headers=None):
@@ -42,7 +42,7 @@ def test_google_socket_timeout_is_transient():
 
 
 def test_missing_oauth_client_file_is_config_error():
-    with pytest.raises(ConfigError, match="credentials.json"):
+    with pytest.raises(ConfigError, match=r"credentials\.json"):
         GoogleDocsPublisher().credentials()
 
 
@@ -50,7 +50,7 @@ def test_expired_refresh_token_is_auth_error_with_reauth_hint(tmp_path, monkeypa
     (tmp_path / "token.json").write_text(json.dumps({
         "token": "old", "refresh_token": "r", "client_id": "c", "client_secret": "s",
         "token_uri": "https://oauth2.googleapis.com/token",
-        "expiry": "2000-01-01T00:00:00Z",
+        "expiry": "2000-01-01T00:00:00Z", "scopes": SCOPES,
     }))
 
     def refuse(self, request):

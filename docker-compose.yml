@@ -1,0 +1,70 @@
+# Fully local stack: docgen API + Ollama. Nothing leaves your machine except the
+# Jira API calls (and Google/Confluence, only if you publish there).
+#
+#   cp .env.example .env        # Jira credentials, DOCGEN_API_TOKEN, ...
+#   docker compose up -d        # first start pulls the model (several GB)
+#   curl -H "Authorization: Bearer $DOCGEN_API_TOKEN" -X POST localhost:8000/generate \
+#        -H 'Content-Type: application/json' -d '{"tickets": ["DEMO-2"]}'
+#
+# Generated documents, the SQLite store and Google tokens live in the docgen-data volume:
+#   docker compose cp token.json docgen:/data/token.json     # after `docgen auth google` locally
+#   docker compose cp docgen:/data/docs ./docs                # fetch generated Markdown
+
+services:
+  ollama:
+    image: ollama/ollama:latest   # pin a version tag for reproducible deployments
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+    # NVIDIA GPU (needs the NVIDIA Container Toolkit) — uncomment:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # One-shot: make sure the model is present before docgen starts. Fast when already pulled.
+  ollama-pull:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      OLLAMA_HOST: ollama:11434
+    entrypoint: ["ollama", "pull", "${OLLAMA_MODEL:-qwen2.5:latest}"]
+    volumes:
+      - ollama-models:/root/.ollama
+    restart: "no"
+
+  docgen:
+    build: .
+    image: docgen:latest
+    depends_on:
+      ollama-pull:
+        condition: service_completed_successfully
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DOCGEN_LLM: ollama
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen2.5:latest}
+      DOCGEN_CONCURRENCY: ${DOCGEN_CONCURRENCY:-2}
+    ports:
+      - "127.0.0.1:8000:8000"   # localhost only; put a TLS proxy in front to expose it
+    volumes:
+      # A named volume, not ./data: it inherits the image's ownership, so the non-root
+      # container user can write to it on any host.
+      - docgen-data:/data
+    restart: unless-stopped
+
+volumes:
+  ollama-models:
+  docgen-data:

@@ -38,6 +38,10 @@ and one `@retry` decorator.
 | `docgen.publishers.gdocs` | OAuth installed-app flow → `documents.create` → one styled `batchUpdate` → optional Drive share | Write is pinned to the create's `revisionId`, so a retried write can't insert the text twice |
 | `docgen.publishers.confluence` | POST `/wiki/rest/api/content` with storage-format XHTML | Markdown → XHTML via `markdown_to_storage()` |
 | `docgen.retry` / `docgen.errors` | `@retry` decorator; typed error hierarchy | Rate limits (honour Retry-After, longer base) are handled differently from transient 5xx/timeouts (full-jitter backoff); auth/404/400 never retry |
+| `docgen.templates` | YAML document types (prd, runbook, release notes, API docs, postmortem); prompt + sections + output schema | One schema drives both generation (the section list in the prompt) and evaluation (completeness/structure checks) |
+| `docgen.eval` | Faithfulness / completeness / structure scorers, optional LLM judge, `docgen eval [--compare]` | Faithfulness = every specific (number, path, product, URL) must appear in the ticket; the template's "unknowns" section is exempt |
+| `docgen.pipeline` + `docgen.store` | Batch over a thread pool; SQLite maps ticket+template+target → document | A fingerprint of everything the model saw decides skip vs regenerate; changed tickets update the *same* Doc/page in place |
+| `docgen.server` | FastAPI jobs API + HMAC-verified Jira webhook | Webhook deliveries are de-duplicated on Jira's delivery id, so retries never create a second document |
 | `docgen.config` | Pydantic settings per integration; `preflight()` | Reports *every* missing env var before the first API call or token spent |
 | `docgen.cli` | `docgen DEMO-2 --llm ollama --publish gdocs [--public]` | Saves locally *before* publishing so a publish failure never loses the generated doc |
 
@@ -162,9 +166,21 @@ product is "docs appear when tickets move," not "run a script."
 - Markdown styling covers headings, lists, bold, inline/fenced code — not tables or links in Google Docs.
 - Retries can re-send a non-idempotent call whose response was lost (an OpenRouter generation is
   paid twice; a Confluence page create returns "already exists").
-- OAuth installed-app flow means it cannot run unattended on a server.
-- No PII redaction before the cloud LLM call.
-- Batch mode is sequential; no concurrency yet.
+- Google OAuth still needs a one-time browser consent (`docgen auth google`); the server then
+  runs unattended on the saved refresh token. A service account would remove that step.
+- No PII redaction before the cloud LLM call — and `--context standard` now sends comments
+  (with author names) too. `--context minimal` or Ollama are the mitigations.
+- Image embedding in Google Docs briefly link-shares a temporary Drive copy, because the Docs
+  API only inserts images it can fetch without credentials.
+- Updating a Google Doc in place replaces the whole body: manual edits made in the Doc since the
+  last run are overwritten (the Doc's version history keeps them).
+- Concurrency is threads in one process; the server's job queue is in-process too (state in
+  SQLite survives restarts, but jobs don't resume). Scaling out would need a real queue.
+- The default faithfulness score is an entity-grounding proxy: it catches invented specifics
+  (numbers, endpoints, product names) but not unsupported claims made in ordinary words. The
+  `--judge` LLM score covers that, at a cost, and is itself a model that can be wrong.
+- Six fixture tickets is a smoke test, not a benchmark; scores across models are only comparable
+  on the same fixture set.
 
 ---
 

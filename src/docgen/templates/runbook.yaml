@@ -1,0 +1,43 @@
+title: Operational Runbook
+description: Step-by-step procedure an on-call engineer can follow under pressure.
+system_prompt: |
+  You are a site reliability engineer writing an operational runbook.
+  The reader is an on-call engineer, possibly at 3am: every step must be explicit,
+  in order, and verifiable. Commands go in fenced code blocks. Never invent hostnames,
+  commands, dashboards or thresholds the ticket does not give — use clearly marked
+  placeholders like <service-name> instead.
+sections:
+  - title: Purpose
+    aliases: [Overview, Summary]
+    guidance: When to use this runbook and what it achieves.
+    format: prose
+    min_words: 20
+  - title: Prerequisites
+    guidance: Access, tools and permissions needed before starting.
+    format: list
+    min_words: 10
+  - title: Procedure
+    aliases: [Steps]
+    guidance: The numbered steps, each with the exact action and its expected result.
+    format: ordered_list
+    min_words: 40
+  - title: Verification
+    guidance: How to confirm the procedure worked.
+    format: list
+    min_words: 10
+  - title: Rollback
+    guidance: How to undo the procedure safely.
+    format: [ordered_list, list]
+    min_words: 10
+  - title: Escalation
+    guidance: Who to contact and when, if the ticket says.
+    required: false
+    min_words: 5
+  - title: Known Gaps
+    aliases: [Open Questions, Known Limitations]
+    guidance: Steps, values or contacts the ticket does not specify.
+    format: list
+    unknowns: true
+    min_words: 5
+output:
+  heading_level: 2

@@ -1,29 +1,32 @@
-"""The prompt contract shared by every backend — the model is swappable, the contract is not."""
+"""
+The prompt contract shared by every backend — the model is swappable, the contract is not.
+
+The template supplies the persona, the sections and their format; the
+faithfulness rule is appended to every template's system prompt so no
+template can drop it.
+"""
 from __future__ import annotations
 
+from docgen.assets import image_name
 from docgen.models import Ticket
+from docgen.templates import Template, render_user_prompt
 
-SYSTEM_PROMPT = """You are a senior technical writer at a software company.
-Your job is to write clear, structured product documentation based on Jira tickets.
-Always structure your document with these sections:
-1. Overview
-2. Technical Details
-3. Implementation Steps
-4. Acceptance Criteria
-5. Known Limitations
-Only state facts that are in the ticket or are standard engineering practice; if the ticket
-does not specify something, say so under Known Limitations instead of inventing it."""
+FAITHFULNESS_RULE = (
+    "Only state facts that are in the ticket or are standard engineering practice; "
+    "if the ticket does not specify something, say so under {unknowns} instead of inventing it."
+)
 
 
-def build_messages(ticket: Ticket) -> list[dict]:
-    user_prompt = f"""Write a complete technical document for this Jira ticket:
+def system_prompt(template: Template) -> str:
+    unknowns = template.unknowns_section
+    where = f'"{unknowns.title}"' if unknowns else "an explicit note"
+    return f"{template.system_prompt.strip()}\n{FAITHFULNESS_RULE.format(unknowns=where)}"
 
-TICKET ID: {ticket.key}
-TITLE: {ticket.title}
-DESCRIPTION: {ticket.description}
-STATUS: {ticket.status}
-LABELS: {", ".join(ticket.labels) or "none"}
 
-Generate a full, publication-ready technical document in Markdown."""
-    return [{"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt}]
+def build_messages(ticket: Ticket, template: Template, *, context_chars: int = 15_000) -> list[dict]:
+    user = render_user_prompt(template, key=ticket.key, title=ticket.title,
+                              description=ticket.description, status=ticket.status,
+                              labels=ticket.labels, context=ticket.context_text(context_chars),
+                              images=[image_name(a) for a in ticket.images])
+    return [{"role": "system", "content": system_prompt(template)},
+            {"role": "user", "content": user}]
