@@ -134,7 +134,7 @@ def test_confluence_errors(monkeypatch, jira_env, response, error, text):
 
 def test_confluence_space_from_env(monkeypatch, jira_env):
     monkeypatch.setenv("CONFLUENCE_SPACE_KEY", "DOCS")
-    transport = FakeTransport(monkeypatch, make_response(200, {"_links": {"webui": "/x"}}))
+    transport = FakeTransport(monkeypatch, make_response(200, {"id": "9", "_links": {"webui": "/x"}}))
     ConfluencePublisher().publish(DOC)
     assert transport.calls[0][2]["json"]["space"] == {"key": "DOCS"}
 
@@ -286,7 +286,7 @@ def test_empty_document_skips_the_write(google_http):
     from docgen.publishers.gdocs import GoogleDocsPublisher
     google_http.outcomes.append((200, {"documentId": "d", "revisionId": "r"}))
     empty = DOC.model_copy(update={"body": "   "})
-    assert GoogleDocsPublisher().publish(empty) == "https://docs.google.com/document/d/d"
+    assert GoogleDocsPublisher().publish(empty).url == "https://docs.google.com/document/d/d"
     assert len(google_http.calls) == 1
 
 

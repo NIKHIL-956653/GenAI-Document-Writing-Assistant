@@ -12,6 +12,7 @@ import requests
 
 from conftest import Router, completion, issue, make_response
 from docgen.cli import main
+from docgen.publishers.gdocs import SCOPES
 
 JIRA = "atlassian.net/rest/api"
 OPENROUTER = "openrouter.ai"
@@ -67,7 +68,7 @@ def test_private_by_default_no_share_call(env, monkeypatch, google_http):
 def test_full_pipeline_to_confluence(env, monkeypatch, capsys):
     router = Router(monkeypatch, {
         JIRA: [issue()], OPENROUTER: [completion()],
-        CONFLUENCE: [make_response(200, {"_links": {"webui": "/spaces/KAN/pages/1"}})],
+        CONFLUENCE: [make_response(200, {"id": "1", "_links": {"webui": "/spaces/KAN/pages/1"}})],
     })
     assert main(["DEMO-2", "--publish", "confluence"]) == 0
     body = router.calls_to(CONFLUENCE)[0][2]["json"]
@@ -170,7 +171,8 @@ def test_expired_google_token_is_exit_2_with_reauth_hint(env, monkeypatch, tmp_p
     from google.auth.exceptions import RefreshError
     (tmp_path / "token.json").write_text(json.dumps({
         "token": "old", "refresh_token": "r", "client_id": "c", "client_secret": "s",
-        "token_uri": "https://oauth2.googleapis.com/token", "expiry": "2000-01-01T00:00:00Z"}))
+        "token_uri": "https://oauth2.googleapis.com/token", "expiry": "2000-01-01T00:00:00Z",
+        "scopes": SCOPES}))
 
     def refuse(self, request):
         raise RefreshError("invalid_grant: Token has been expired or revoked.")

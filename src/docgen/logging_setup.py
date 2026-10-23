@@ -60,8 +60,23 @@ def _fmt(value) -> str:
     return repr(text) if (" " in text or not text) else text
 
 
+class ProgressAwareHandler(logging.StreamHandler):
+    """Clears an active progress bar before each record and redraws it after."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        from docgen import progress
+        bar = progress.active()
+        if bar is None:
+            super().emit(record)
+            return
+        with bar._lock:
+            bar.clear()
+            super().emit(record)
+            bar.redraw()
+
+
 def configure(level: str = "INFO", fmt: str = "text") -> None:
-    handler = logging.StreamHandler(sys.stderr)
+    handler = ProgressAwareHandler(sys.stderr)
     handler.setFormatter(JsonFormatter() if fmt == "json" else TextFormatter())
     root = logging.getLogger()
     root.handlers[:] = [handler]

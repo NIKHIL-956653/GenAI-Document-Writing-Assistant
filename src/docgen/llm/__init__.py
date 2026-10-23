@@ -26,8 +26,9 @@ def get_backend(name: str, model: str | None = None) -> Backend:
     raise ValueError(f"unknown LLM backend {name!r}; choose from {', '.join(BACKENDS)}")
 
 
-def generate(backend: Backend, ticket: Ticket, template: Template) -> GeneratedDocument:
-    completion = backend.complete(build_messages(ticket, template))
+def generate(backend: Backend, ticket: Ticket, template: Template, *,
+             context_chars: int = 15_000) -> GeneratedDocument:
+    completion = backend.complete(build_messages(ticket, template, context_chars=context_chars))
     log.info("document generated", extra={
         "ticket": ticket.key, "template": template.name, "backend": backend.name,
         "model": backend.model, "chars": len(completion.text),

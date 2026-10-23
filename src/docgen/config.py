@@ -160,3 +160,43 @@ def preflight(llm: str, publish: str) -> None:
 def preflight_backends(backends: list[str]) -> None:
     """For `docgen eval`: only the LLM settings matter (fixtures replace Jira)."""
     _raise_if(_problems([llm_settings(b) for b in backends]))
+
+
+class DocgenSettings(_Settings):
+    """docgen's own settings: the store, and the HTTP server's defaults (`docgen serve`)."""
+    model_config = SettingsConfigDict(env_prefix="DOCGEN_")
+
+    store: Path = Path(".docgen") / "docgen.db"
+    output_dir: Path = Path(".")
+    # server: what a request gets when it doesn't say
+    llm: str = "openrouter"
+    model: str | None = None
+    template: str = "technical"
+    context: str = "standard"
+    concurrency: int = Field(default=4, ge=1, le=32)
+    workers: int = Field(default=2, ge=1, le=16)    # jobs running at once
+    api_token: SecretStr | None = None              # Bearer token for the API; unset = open
+    # Jira webhook: generate when an issue moves into one of these statuses
+    webhook_secret: SecretStr | None = None
+    webhook_statuses: str = "Done"                  # comma-separated, case-insensitive
+    webhook_template: str | None = None             # default: `template`
+    webhook_publish: str = "none"                   # none | gdocs | confluence
+    webhook_public: bool = False
+
+    @field_validator("llm")
+    @classmethod
+    def _known_llm(cls, value: str) -> str:
+        if value not in ("openrouter", "ollama"):
+            raise ValueError("must be openrouter or ollama")
+        return value
+
+    @field_validator("webhook_publish")
+    @classmethod
+    def _known_target(cls, value: str) -> str:
+        if value not in ("none", "gdocs", "confluence"):
+            raise ValueError("must be none, gdocs or confluence")
+        return value
+
+    @property
+    def statuses(self) -> set[str]:
+        return {s.strip().casefold() for s in self.webhook_statuses.split(",") if s.strip()}

@@ -70,6 +70,8 @@ def parse_verdict(text: str) -> Verdict:
 def judge_faithfulness(judge: Backend, document: str, ticket: Ticket) -> tuple[Score, TokenUsage | None]:
     ticket_text = (f"ID: {ticket.key}\nTITLE: {ticket.title}\nSTATUS: {ticket.status}\n"
                    f"LABELS: {', '.join(ticket.labels) or 'none'}\nDESCRIPTION:\n{ticket.description}")
+    if context := ticket.context_text(max_chars=40_000):
+        ticket_text += f"\nCONTEXT:\n{context}"
     messages = [{"role": "system", "content": JUDGE_SYSTEM},
                 {"role": "user", "content": JUDGE_USER.format(ticket=ticket_text, document=document)}]
     method = f"llm-judge:{judge.name}/{judge.model}"

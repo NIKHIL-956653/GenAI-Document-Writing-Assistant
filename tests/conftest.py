@@ -1,4 +1,5 @@
 import json
+import threading
 
 import pytest
 import requests
@@ -63,20 +64,29 @@ class FakeTransport:
 class Router:
     """
     Routes requests by URL substring to queues of responses/exceptions, so one
-    test can drive Jira, OpenRouter, Ollama and Confluence together.
+    test can drive Jira, OpenRouter, Ollama and Confluence together. A route may
+    also be a function (method, url, kwargs) -> response, for concurrent runs
+    where the order of calls isn't fixed.
     """
 
     def __init__(self, monkeypatch, routes: dict):
-        self.routes = {k: list(v) for k, v in routes.items()}
+        self.routes = {k: v if callable(v) else list(v) for k, v in routes.items()}
         self.calls = []
+        self._lock = threading.Lock()
         monkeypatch.setattr(requests, "request", self._request)
         monkeypatch.setattr(requests.Session, "request",
                             lambda _self, method, url, **kw: self._request(method, url, **kw))
 
     def _request(self, method, url, **kwargs):
-        self.calls.append((method, url, kwargs))
+        with self._lock:
+            self.calls.append((method, url, kwargs))
         for fragment, queue in self.routes.items():
             if fragment in url:
+                if callable(queue):
+                    outcome = queue(method, url, kwargs)
+                    if isinstance(outcome, BaseException):
+                        raise outcome
+                    return outcome
                 if not queue:
                     raise AssertionError(f"no more fake responses for {fragment}")
                 outcome = queue.pop(0)
@@ -101,8 +111,13 @@ class FakeGoogleHttp:
 
     def request(self, uri, method="GET", body=None, headers=None, **_):
         import httplib2
-        self.calls.append({"uri": uri, "method": method,
-                           "body": json.loads(body) if body else None})
+        try:
+            parsed = json.loads(body) if body else None
+        except (ValueError, UnicodeDecodeError):
+            parsed = body  # multipart media upload
+        self.calls.append({"uri": uri, "method": method, "body": parsed})
+        if not self.outcomes:
+            raise AssertionError(f"no more fake Google responses for {method} {uri}")
         outcome = self.outcomes.pop(0)
         if isinstance(outcome, BaseException):
             raise outcome

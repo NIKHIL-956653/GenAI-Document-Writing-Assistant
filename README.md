@@ -24,6 +24,9 @@ Publishes to Google Docs automatically
 - **Google Drive API** — file management
 - **Pydantic / pydantic-settings** — typed config and data models, `.env` loading
 - **PyYAML** — document templates and eval fixtures
+- **FastAPI / uvicorn** — HTTP API and Jira webhook (`docgen[server]`)
+- **SQLite** — incremental ticket → document store and job state
+- **Docker / Compose** — API image, plus Ollama for fully local operation
 - **pytest, ruff, mypy, GitHub Actions** — tests, lint, types, CI
 
 ## Project Structure
@@ -44,8 +47,14 @@ GenAI-Document-Writing-Assistant/
 │   ├── llm/                     # Prompt contract + OpenRouter / Ollama backends
 │   ├── templates/               # Document types as YAML (prd, runbook, ...) + loader
 │   ├── eval/                    # Scorers, LLM judge, fixture tickets, `docgen eval`
-│   └── publishers/              # Google Docs, Confluence, markdown conversion
-├── docs/                        # templates.md, evaluation.md
+│   ├── publishers/              # Google Docs, Confluence (create or update in place)
+│   ├── store.py                 # SQLite: ticket → document mapping, server jobs
+│   ├── diff.py                  # What changed between versions
+│   ├── assets.py                # Ticket images in documents
+│   ├── progress.py              # Batch progress bar
+│   └── server.py                # FastAPI app + Jira webhook
+├── docs/                        # templates, evaluation, batch, server guides
+├── Dockerfile, docker-compose.yml  # API image; API + Ollama stack
 ├── tests/                       # pytest suite — no network or credentials needed
 ├── .github/workflows/ci.yml     # ruff + mypy + pytest/coverage on every PR
 └── main.py                      # Back-compat shim for `python main.py ...`
@@ -109,12 +118,51 @@ docgen DEMO-2 --publish confluence     # + create a Confluence page
 docgen DEMO-1 DEMO-2 DEMO-3 --review   # batch; show each doc and ask before publishing
 docgen DEMO-2 --log-format json        # one JSON log object per line (stderr)
 docgen DEMO-2 --template runbook       # pick the document type (see below)
+docgen --jql "project = DEMO AND status = Done" -j 8 --publish gdocs   # batch, 8 at a time
+docgen DEMO-2 --publish gdocs --show-diff   # re-run: updates the same Doc, shows what changed
+docgen DEMO-2 --context full           # + all comments, related issues, embedded images
+docgen docs                            # which ticket went to which document
 ```
 
 `python main.py ...` and `python -m docgen ...` accept the same arguments.
 
 Exit codes: `0` every ticket succeeded · `1` at least one ticket failed · `2` setup problem
-(missing env vars, bad credentials, invalid ticket key).
+(missing env vars, bad credentials, invalid ticket key or JQL).
+
+## Batch, incremental updates, context
+
+- **Batch.** `--jql` takes every matching issue, and `-j N` processes N
+  tickets at a time. A live progress bar shows done/failed/unchanged counts,
+  what's running, and an ETA.
+- **Incremental.** A local SQLite store (`.docgen/docgen.db`) maps each
+  ticket + template + target to its Google Doc, Confluence page or file. A
+  re-run skips tickets that haven't changed, which costs no tokens. A changed
+  ticket **updates the existing document in place** (same URL, sharing and
+  comments) and logs what changed; `--show-diff` prints the diff.
+- **Context.** `--context minimal | standard | full` controls how much of the
+  ticket's surroundings the model sees. `standard` (the default) adds
+  comments, linked issues and subtasks. `full` adds their descriptions and
+  embeds the ticket's images in the local file, Google Doc or Confluence page.
+
+Details: [docs/batch.md](docs/batch.md).
+
+## HTTP API, Jira webhook, Docker
+
+```bash
+pip install -e ".[server]" && docgen serve     # http://127.0.0.1:8000/docs
+docker compose up -d                           # API + Ollama: fully local LLM
+```
+
+- `POST /generate` and `POST /publish` queue jobs and return 202.
+  `GET /status/{id}` reports per-ticket results, including what changed.
+- `POST /webhooks/jira` generates a document automatically when an issue
+  moves into a configured status (`DOCGEN_WEBHOOK_STATUSES`). Requests are
+  HMAC-verified and Jira's retries are de-duplicated.
+- Bearer-token auth (`DOCGEN_API_TOKEN`). The Docker image runs as a non-root
+  user, and compose adds an Ollama service that pulls the model on first
+  start.
+
+Details: [docs/server.md](docs/server.md). All settings: [.env.example](.env.example).
 
 ## Document templates
 
@@ -171,7 +219,7 @@ Tokens and cost are tracked per run and per model. Details:
 ## Tests and CI
 
 ```bash
-pytest --cov            # 249 tests, no network or credentials needed; fails under 95% coverage
+pytest --cov            # 368 tests, no network or credentials needed; fails under 95% coverage
 ruff check .
 mypy
 ```
@@ -179,14 +227,16 @@ mypy
 Jira, OpenRouter, Ollama, Confluence and the Google APIs are faked at the
 transport layer, so the tests run the real retry, error-classification and
 CLI code. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs ruff,
-mypy, and pytest with coverage (Python 3.10–3.13) on every pull request.
+mypy, and pytest with coverage (Python 3.10–3.13), plus a Docker build and smoke test, on every
+pull request.
 The coverage table is posted to the job summary and as a PR comment.
 
 ## How It Works
 
 ### 1. Jira Integration
 Connects to Jira REST API v3 using Basic Auth (email + API token).
-Fetches title, description, status, labels. The description arrives as Atlassian Document Format
+Fetches title, description, status and labels, plus comments, linked issues, subtasks and
+attachments, depending on `--context`. The description arrives as Atlassian Document Format
 (a JSON tree) and is flattened to plain text before it reaches the model.
 
 ### 2. LLM Document Generation

@@ -76,6 +76,21 @@ jobs:
             coverage-summary.md
           if-no-files-found: ignore
 
+  docker:
+    name: docker build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t docgen:ci .
+      - name: Smoke test the API
+        run: |
+          docker run -d --name docgen -p 8000:8000 docgen:ci
+          for i in $(seq 1 30); do curl -fsS localhost:8000/healthz && exit 0; sleep 1; done
+          docker logs docgen; exit 1
+      - name: Validate docker-compose.yml
+        run: docker compose config -q
+
   coverage-comment:
     name: coverage comment
     needs: test

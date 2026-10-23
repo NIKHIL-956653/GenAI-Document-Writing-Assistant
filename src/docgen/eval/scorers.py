@@ -67,8 +67,8 @@ GENERIC_NUMBERS = {"0", "1", "2", "200", "201", "204", "400", "401", "403", "404
 
 
 def _ticket_corpus(ticket: Ticket) -> str:
-    return " ".join([ticket.key, ticket.title, ticket.description, ticket.status,
-                     *ticket.labels]).lower()
+    # Comments, linked issues and subtasks were in the prompt too, so they count as source.
+    return ticket.full_text().lower()
 
 
 def _grounded_text(term: str, corpus: str) -> bool:

@@ -88,7 +88,7 @@ class Template(BaseModel):
     system_prompt: str = Field(min_length=1)
     instructions: str = ""
     # Optional full override of the user message. `$`-placeholders:
-    # $key $title $description $status $labels $sections $instructions
+    # $key $title $description $status $labels $context $images $sections $instructions
     user_prompt: str | None = None
     sections: list[SectionSpec] = Field(min_length=1)
     output: OutputSpec = Field(default_factory=OutputSpec)
@@ -187,11 +187,20 @@ def load_template(name: str, extra: Path | None = None) -> Template:
     return parse_template(files[name])
 
 
+IMAGE_INSTRUCTION = ("These images from the ticket can be embedded. To place one where it helps the "
+                     "reader, write ![short caption](attachment:FILENAME) on its own line, using a "
+                     "filename from this list exactly: {names}")
+
+
 def render_user_prompt(template: Template, *, key: str, title: str, description: str,
-                       status: str, labels: list[str]) -> str:
+                       status: str, labels: list[str], context: str = "",
+                       images: list[str] | None = None) -> str:
+    image_note = IMAGE_INSTRUCTION.format(names=", ".join(images)) if images else ""
     values = {
         "key": key, "title": title, "description": description, "status": status,
         "labels": ", ".join(labels) or "none",
+        "context": context,
+        "images": image_note,
         "sections": template.section_outline(),
         "instructions": template.instructions.strip(),
     }
@@ -206,6 +215,8 @@ def render_user_prompt(template: Template, *, key: str, title: str, description:
         f"DESCRIPTION: {description}",
         f"STATUS: {status}",
         f"LABELS: {values['labels']}",
+        *(["", "CONTEXT (comments, related issues and attachments; treat as part of the ticket):",
+           context] if context else []),
         "",
         "Use exactly these sections, as Markdown headings at the level shown, in this order:",
         "",
@@ -214,6 +225,8 @@ def render_user_prompt(template: Template, *, key: str, title: str, description:
     ]
     if values["instructions"]:
         parts += [values["instructions"], ""]
+    if image_note:
+        parts += [image_note, ""]
     parts.append("Start directly with the first section heading: no title line, no preamble, "
                  "no closing remarks. Output Markdown only.")
     return "\n".join(parts)

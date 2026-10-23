@@ -68,3 +68,7 @@ class RateLimitError(RetryableError):
 
 class TransientError(RetryableError):
     """5xx, timeouts, dropped connections — likely to succeed on a later attempt."""
+
+
+class InvalidJQLError(DocgenError):
+    """Jira rejected a JQL query (caught before any document is generated)."""

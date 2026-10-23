@@ -32,3 +32,8 @@ coverage-summary.md
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+
+# Local state
+.docgen/
+data/
+*_attachments/
