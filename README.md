@@ -272,7 +272,7 @@ overview, implementation steps, acceptance criteria, and limitations.
 
 ## Author
 
-**Nikhil Chandra Sairam Tokala**  
+**Nikhil Vijayapuri**  
 AI/ML Engineer | GenAI Engineer | DevOps  
 Dubai, UAE  
 [LinkedIn](https://linkedin.com/in/nikhil-chandra-133ncsr200233) | 
