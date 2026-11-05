@@ -14,8 +14,11 @@ Generation takes tens of seconds per ticket, so requests are queued as jobs
 and run on a worker pool; job state lives in the SQLite store, so status
 survives a restart. Every job runs the same incremental Pipeline as the CLI.
 
-Auth: with DOCGEN_API_TOKEN set, every endpoint except /healthz and the
-webhook needs `Authorization: Bearer <token>`. The webhook is verified with
+Auth: every endpoint except /healthz and the webhook needs
+`Authorization: Bearer <DOCGEN_API_TOKEN>`. The server fails closed: without a
+usable token (set, not a placeholder, at least 32 characters) create_app()
+raises ConfigError and `docgen serve` exits instead of serving an open API.
+The webhook is verified with
 DOCGEN_WEBHOOK_SECRET instead — Jira's `X-Hub-Signature: sha256=<hmac>`
 header, or the secret itself as `X-Docgen-Webhook-Token` / `?token=` for
 senders that can't sign (Jira Automation's "Send web request").
@@ -158,6 +161,7 @@ class JobRunner:
 def create_app(settings: DocgenSettings | None = None, *, store: Store | None = None,
                templates_dir: Path | None = None) -> FastAPI:
     settings = settings or config.load(DocgenSettings)
+    expected = f"Bearer {config.require_api_token(settings)}".encode()  # fail closed, before anything else
     store = store or Store(settings.store)
     runner = JobRunner(store, settings, templates_dir)
 
@@ -166,8 +170,6 @@ def create_app(settings: DocgenSettings | None = None, *, store: Store | None = 
         stale = store.mark_interrupted()
         if stale:
             log.warning("marked unfinished jobs from a previous run as interrupted", extra={"jobs": stale})
-        if settings.api_token is None:
-            log.warning("DOCGEN_API_TOKEN is not set — the API accepts unauthenticated requests")
         yield
         runner.shutdown()
 
@@ -176,10 +178,7 @@ def create_app(settings: DocgenSettings | None = None, *, store: Store | None = 
     app.state.runner, app.state.store, app.state.settings = runner, store, settings
 
     def require_token(authorization: str | None = Header(default=None)) -> None:
-        if settings.api_token is None:
-            return
-        expected = f"Bearer {settings.api_token.get_secret_value()}"
-        if not authorization or not hmac.compare_digest(authorization.encode(), expected.encode()):
+        if not authorization or not hmac.compare_digest(authorization.encode(), expected):
             raise HTTPException(401, detail="missing or invalid bearer token",
                                 headers={"WWW-Authenticate": "Bearer"})
 

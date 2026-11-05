@@ -165,7 +165,9 @@ docker compose up -d                           # API + Ollama: fully local LLM
   plain secret comparison, not a signature, and a secret in a URL can end up
   in proxy and access logs, so prefer the header. Jira's retries are
   de-duplicated.
-- Bearer-token auth (`DOCGEN_API_TOKEN`). The Docker image runs as a non-root
+- Bearer-token auth (`DOCGEN_API_TOKEN`, required). The server refuses to
+  start if the token is unset, a placeholder such as `change-me`, or shorter
+  than 32 characters, rather than serving an open API. The Docker image runs as a non-root
   user, and compose adds an Ollama service that pulls the model on first
   start.
 
@@ -230,7 +232,7 @@ Tokens and cost are tracked per run and per model. Details:
 ## Tests and CI
 
 ```bash
-pytest --cov            # 371 tests, no network or credentials needed; fails under 95% coverage
+pytest --cov            # 379 tests, no network or credentials needed; fails under 95% coverage
 ruff check .
 mypy
 ```

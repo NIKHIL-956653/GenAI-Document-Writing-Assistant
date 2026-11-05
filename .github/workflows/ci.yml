@@ -83,9 +83,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build the image
         run: docker build -t docgen:ci .
+      - name: The API refuses to start without a token
+        run: |
+          if docker run --rm docgen:ci; then echo "server started without DOCGEN_API_TOKEN"; exit 1; fi
       - name: Smoke test the API
         run: |
-          docker run -d --name docgen -p 8000:8000 docgen:ci
+          docker run -d --name docgen -p 8000:8000 -e DOCGEN_API_TOKEN="$(openssl rand -hex 32)" docgen:ci
           for i in $(seq 1 30); do curl -fsS localhost:8000/healthz && exit 0; sleep 1; done
           docker logs docgen; exit 1
       - name: Validate docker-compose.yml

@@ -175,13 +175,20 @@ class DocgenSettings(_Settings):
     context: str = "standard"
     concurrency: int = Field(default=4, ge=1, le=32)
     workers: int = Field(default=2, ge=1, le=16)    # jobs running at once
-    api_token: SecretStr | None = None              # Bearer token for the API; unset = open
+    # Bearer token for the API. Required by `docgen serve`: see require_api_token().
+    api_token: SecretStr | None = None
     # Jira webhook: generate when an issue moves into one of these statuses
     webhook_secret: SecretStr | None = None
     webhook_statuses: str = "Done"                  # comma-separated, case-insensitive
     webhook_template: str | None = None             # default: `template`
     webhook_publish: str = "none"                   # none | gdocs | confluence
     webhook_public: bool = False
+
+    @field_validator("api_token", "webhook_secret", mode="before")
+    @classmethod
+    def _blank_is_unset(cls, value):
+        # `DOCGEN_API_TOKEN=` in a .env file means "not set", not "the empty token".
+        return None if isinstance(value, str) and not value.strip() else value
 
     @field_validator("llm")
     @classmethod
@@ -200,3 +207,28 @@ class DocgenSettings(_Settings):
     @property
     def statuses(self) -> set[str]:
         return {s.strip().casefold() for s in self.webhook_statuses.split(",") if s.strip()}
+
+
+MIN_API_TOKEN_LENGTH = 32
+# Values from old examples and docs that must never work as a real token.
+PLACEHOLDER_TOKENS = {"change-me", "changeme", "change_me", "secret", "token", "your-token"}
+TOKEN_HINT = ("Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(32))\" "
+              "and set it as DOCGEN_API_TOKEN")
+
+
+def require_api_token(settings: DocgenSettings) -> str:
+    """
+    The server fails closed: it refuses to start without a usable API token rather
+    than serving unauthenticated requests. Returns the token; raises ConfigError.
+    """
+    if settings.api_token is None:
+        raise ConfigError("DOCGEN_API_TOKEN is not set; the API will not start without it",
+                          hint=TOKEN_HINT)
+    token = settings.api_token.get_secret_value()
+    if token.strip().casefold() in PLACEHOLDER_TOKENS:
+        raise ConfigError("DOCGEN_API_TOKEN is still the placeholder from .env.example",
+                          hint=TOKEN_HINT)
+    if len(token) < MIN_API_TOKEN_LENGTH:
+        raise ConfigError(f"DOCGEN_API_TOKEN is too short ({len(token)} characters; "
+                          f"at least {MIN_API_TOKEN_LENGTH} required)", hint=TOKEN_HINT)
+    return token
