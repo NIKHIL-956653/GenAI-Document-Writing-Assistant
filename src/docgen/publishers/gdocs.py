@@ -25,7 +25,9 @@ publish.
 from __future__ import annotations
 
 import logging
+import os
 import threading
+from pathlib import Path
 from typing import Any
 
 import httplib2
@@ -86,6 +88,27 @@ def classify_google_error(exc: Exception, what: str) -> DocgenError:
     return TransientError(f"Google API {what}: {type(exc).__name__}: {exc}", service=SERVICE)
 
 
+def write_private(path: Path, text: str) -> None:
+    """
+    Write `path` readable and writable by its owner only (0600), replacing it atomically.
+
+    The token file holds a refresh token and the OAuth client secret. The text goes to
+    a 0600 temporary file that then replaces the target, so the secret is never on disk
+    with wider permissions, even when an older token file was world-readable.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.tmp")
+    tmp.unlink(missing_ok=True)  # O_CREAT's mode only applies to a file it creates
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
 def _execute(request, what: str):
     try:
         return request.execute(num_retries=0)
@@ -140,8 +163,7 @@ class GoogleDocsPublisher:
         else:
             creds = self._consent()
 
-        token_file.parent.mkdir(parents=True, exist_ok=True)
-        token_file.write_text(creds.to_json(), encoding="utf-8")
+        write_private(token_file, creds.to_json())
         return creds
 
     def _consent(self) -> Credentials:
