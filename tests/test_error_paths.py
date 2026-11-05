@@ -2,6 +2,8 @@
 import datetime as dt
 import json
 import logging
+import os
+import stat
 
 import pytest
 import requests
@@ -199,6 +201,33 @@ def test_first_run_consents_and_saves_token(tmp_path, flow):
     creds = GoogleDocsPublisher().credentials()
     assert flow.ran and creds.token == "new-token"
     assert json.loads((tmp_path / "token.json").read_text())["token"] == "new-token"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes")
+@pytest.mark.parametrize("existing_mode", [None, 0o644])
+def test_saved_token_is_private(tmp_path, flow, existing_mode):
+    from docgen.publishers.gdocs import GoogleDocsPublisher
+    token = tmp_path / "token.json"
+    if existing_mode is not None:  # an older, world-readable token without the needed scopes
+        token_json(token, future(), scopes=False)
+        token.chmod(existing_mode)
+    (tmp_path / "credentials.json").write_text("{}")
+    GoogleDocsPublisher().credentials()
+    assert flow.ran
+    assert stat.S_IMODE(token.stat().st_mode) == 0o600
+    assert json.loads(token.read_text())["token"] == "new-token"
+    assert [p.name for p in tmp_path.iterdir() if p.name.endswith(".tmp")] == []
+
+
+def test_failed_token_write_leaves_no_temporary_file(tmp_path, monkeypatch):
+    from docgen.publishers import gdocs
+
+    def broken_replace(src, dst):
+        raise OSError("disk full")
+    monkeypatch.setattr(gdocs.os, "replace", broken_replace)
+    with pytest.raises(OSError, match="disk full"):
+        gdocs.write_private(tmp_path / "token.json", '{"token": "t"}')
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_valid_token_is_reused_without_consent(tmp_path, flow):

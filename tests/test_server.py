@@ -9,10 +9,11 @@ from fastapi.testclient import TestClient
 
 from conftest import Router, completion, issue, make_response
 from docgen.config import DocgenSettings
+from docgen.errors import ConfigError
 from docgen.server import create_app, webhook_decision
 from docgen.store import Store
 
-TOKEN = "api-token"
+TOKEN = "test-api-token-0123456789abcdefghij"
 SECRET = "hook-secret"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
@@ -78,12 +79,55 @@ def test_api_requires_the_bearer_token(client, headers):
     assert r.status_code == 401 and r.headers["www-authenticate"] == "Bearer"
 
 
-def test_open_api_when_no_token_configured(jira_env, openrouter_env, tmp_path, monkeypatch, caplog):
+@pytest.mark.parametrize(("token", "message"), [
+    (None, "is not set"),
+    ("", "is not set"),
+    ("   ", "is not set"),
+    ("change-me", "placeholder"),
+    ("CHANGE-ME", "placeholder"),
+    ("a" * 31, "too short"),
+])
+def test_server_refuses_to_start_without_a_usable_token(tmp_path, monkeypatch, token, message):
+    """Fail closed: no token, the .env.example placeholder, or a short token never serves requests."""
+    monkeypatch.delenv("DOCGEN_API_TOKEN", raising=False)
+    settings = DocgenSettings(store=tmp_path / "s.db", output_dir=tmp_path,
+                              **({} if token is None else {"api_token": token}))
+    with pytest.raises(ConfigError, match=message) as info:
+        create_app(settings)
+    assert "secrets.token_urlsafe" in info.value.hint
+    assert not (tmp_path / "s.db").exists()   # nothing is set up before the check
+
+
+def test_blank_token_in_env_file_counts_as_unset(tmp_path, monkeypatch):
+    (tmp_path / ".env").write_text("DOCGEN_API_TOKEN=\nDOCGEN_WEBHOOK_SECRET=\n")
+    monkeypatch.chdir(tmp_path)
+    settings = DocgenSettings()
+    assert settings.api_token is None and settings.webhook_secret is None
+    with pytest.raises(ConfigError, match="is not set"):
+        create_app(settings)
+
+
+def test_serve_command_exits_without_a_token(tmp_path, monkeypatch, capsys):
+    import uvicorn
+
+    from docgen.cli import main
+
+    def must_not_run(*args, **kwargs):
+        raise AssertionError("server started without an API token")
+    monkeypatch.setattr(uvicorn, "run", must_not_run)
+    monkeypatch.delenv("DOCGEN_API_TOKEN", raising=False)
+    monkeypatch.setenv("DOCGEN_STORE", str(tmp_path / "s.db"))
+    assert main(["serve"]) == 2
+    assert "DOCGEN_API_TOKEN is not set" in capsys.readouterr().err
+
+
+def test_minimum_length_token_is_accepted(jira_env, openrouter_env, tmp_path, monkeypatch):
     jira_and_llm(monkeypatch)
-    settings = DocgenSettings(store=tmp_path / "s.db", output_dir=tmp_path)
+    token = "x" * 32
+    settings = DocgenSettings(store=tmp_path / "s.db", output_dir=tmp_path, api_token=token)
     with TestClient(create_app(settings)) as c:
-        assert c.get("/jobs").status_code == 200
-    assert "DOCGEN_API_TOKEN is not set" in caplog.text
+        assert c.get("/jobs").status_code == 401
+        assert c.get("/jobs", headers={"Authorization": f"Bearer {token}"}).status_code == 200
 
 
 def test_templates_endpoint(client):

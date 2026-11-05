@@ -1,8 +1,9 @@
 # Document templates
 
 A template decides what kind of document `docgen` writes: its prompt, its
-sections, and the output schema the result is checked against. Templates are
-YAML files, so adding a document type needs no code.
+sections, and an output schema. When generating, the schema only shapes the
+prompt; `docgen eval` is the only place a document is scored against it.
+Templates are YAML files, so adding a document type needs no code.
 
 ```bash
 docgen templates                        # list what's available

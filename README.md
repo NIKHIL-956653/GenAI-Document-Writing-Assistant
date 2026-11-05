@@ -12,16 +12,17 @@ Feeds ticket into LLM (Gemini / Ollama)
 ↓
 AI generates full technical document
 ↓
-Publishes to Google Docs automatically
+Saves it as Markdown, and with `--publish` creates or updates a Google Doc or Confluence page
 
 ## Tech Stack
 
 - **Python** — core language
 - **Jira REST API** — ticket data source
-- **OpenRouter (Gemini 2.0 Flash)** — cloud LLM
-- **Ollama (Qwen)** — local LLM, same prompt, nothing leaves the machine
+- **OpenRouter (Gemini 2.0 Flash Lite by default)** — cloud LLM
+- **Ollama (Qwen)** — local LLM, same prompt; the ticket is not sent to a cloud LLM
 - **Google Docs API** — document publishing
 - **Google Drive API** — file management
+- **Confluence REST API** — page publishing
 - **Pydantic / pydantic-settings** — typed config and data models, `.env` loading
 - **PyYAML** — document templates and eval fixtures
 - **FastAPI / uvicorn** — HTTP API and Jira webhook (`docgen[server]`)
@@ -156,9 +157,17 @@ docker compose up -d                           # API + Ollama: fully local LLM
 - `POST /generate` and `POST /publish` queue jobs and return 202.
   `GET /status/{id}` reports per-ticket results, including what changed.
 - `POST /webhooks/jira` generates a document automatically when an issue
-  moves into a configured status (`DOCGEN_WEBHOOK_STATUSES`). Requests are
-  HMAC-verified and Jira's retries are de-duplicated.
-- Bearer-token auth (`DOCGEN_API_TOKEN`). The Docker image runs as a non-root
+  moves into a configured status (`DOCGEN_WEBHOOK_STATUSES`). Jira's own
+  webhooks are signed, and docgen verifies the HMAC-SHA256 signature in
+  `X-Hub-Signature`. Senders that can't sign, such as Jira Automation's "Send
+  web request", may instead send the shared secret itself in an
+  `X-Docgen-Webhook-Token` header or a `?token=` query parameter. That is a
+  plain secret comparison, not a signature, and a secret in a URL can end up
+  in proxy and access logs, so prefer the header. Jira's retries are
+  de-duplicated.
+- Bearer-token auth (`DOCGEN_API_TOKEN`, required). The server refuses to
+  start if the token is unset, a placeholder such as `change-me`, or shorter
+  than 32 characters, rather than serving an open API. The Docker image runs as a non-root
   user, and compose adds an Ollama service that pulls the model on first
   start.
 
@@ -168,8 +177,11 @@ Details: [docs/server.md](docs/server.md). All settings: [.env.example](.env.exa
 
 `--template` picks the document type: `technical` (the default), `prd`,
 `runbook`, `release_notes`, `api_docs` or `postmortem`. Each template is a
-YAML file that defines its own prompt, its sections, and the output schema
-the result is checked against. To add a type, drop a YAML file into
+YAML file that defines its own prompt, its sections, and an output schema
+(required sections, formats, word counts). When generating, the schema only
+shapes the prompt: generated documents are not checked against it before
+they are saved or published. The schema is scored only by `docgen eval`
+(see below). To add a type, drop a YAML file into
 `./templates/` (or `--templates-dir` / `DOCGEN_TEMPLATES_DIR`); no code
 changes needed. `docgen templates` lists what's available. Schema and
 examples: [docs/templates.md](docs/templates.md).
@@ -183,9 +195,10 @@ docgen DEMO-7 --template postmortem --publish confluence
 `docgen eval` runs fixture tickets through one or more models and scores every
 document against the ticket it was written from:
 
-- **Faithfulness**: no claims absent from the ticket. Every specific in the
-  document (numbers, endpoints, product names, config keys, URLs) is checked
-  against the ticket. `--judge` adds an LLM-as-judge score.
+- **Faithfulness**: how well the document sticks to the ticket. Every
+  specific in the document (numbers, URLs, paths, code identifiers, acronyms,
+  product names) is looked up in the ticket; this is a heuristic, not a
+  guarantee. `--judge` adds an LLM-as-judge score.
 - **Completeness**: every required template section is present and has real content.
 - **Structure**: the document follows the template's schema (heading levels,
   order, list/table/code formats, no preamble).
@@ -219,17 +232,21 @@ Tokens and cost are tracked per run and per model. Details:
 ## Tests and CI
 
 ```bash
-pytest --cov            # 368 tests, no network or credentials needed; fails under 95% coverage
+pytest --cov            # 379 tests, no network or credentials needed; fails under 95% coverage
 ruff check .
 mypy
 ```
+
+Status as of November 2026: 379 tests pass, coverage is 98.21% (statements and branches), and
+`ruff check .` and `mypy` report no issues.
 
 Jira, OpenRouter, Ollama, Confluence and the Google APIs are faked at the
 transport layer, so the tests run the real retry, error-classification and
 CLI code. [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs ruff,
 mypy, and pytest with coverage (Python 3.10–3.13), plus a Docker build and smoke test, on every
-pull request.
-The coverage table is posted to the job summary and as a PR comment.
+pull request and push to master.
+The coverage table is posted to the job summary, and as a PR comment for branches in this
+repository (fork PRs can't write comments).
 
 ## How It Works
 
@@ -241,7 +258,7 @@ attachments, depending on `--context`. The description arrives as Atlassian Docu
 
 ### 2. LLM Document Generation
 Builds the prompt from the ticket and the selected template and sends it to:
-- **OpenRouter** (Gemini 2.0 Flash) — cloud, high quality
+- **OpenRouter** (Gemini 2.0 Flash Lite by default; set `OPENROUTER_MODEL` to change) — cloud
 - **Ollama** (Qwen) — local, free, private
 
 The template decides the sections. The default `technical` template produces
@@ -251,7 +268,8 @@ the ticket doesn't specify into its "unknowns" section instead of inventing it.
 
 ### 3. Google Docs Publishing
 Uses OAuth 2.0 (installed-app flow, consent once, refresh token persisted to `token.json`).
-Creates a new Google Doc and inserts the generated content with headings, lists, bold and code styled.
+Creates a Google Doc, or updates the one made by the previous run, with headings, lists, bold and
+code styled.
 Private by default; `--public` shares it as anyone-with-link.
 
 ## Example Output
@@ -266,13 +284,13 @@ overview, implementation steps, acceptance criteria, and limitations.
 ## Results
 
 - ✅ Successfully fetched tickets from Jira REST API
-- ✅ Generated technical documents using Gemini 2.0 Flash
+- ✅ Generated technical documents using Gemini 2.0 Flash Lite
 - ✅ Published documents to Google Docs automatically
 - ✅ Supports both cloud (OpenRouter) and local (Ollama) LLMs
 
 ## Author
 
-**Nikhil Chandra Sairam Tokala**  
+**Nikhil Vijayapuri**  
 AI/ML Engineer | GenAI Engineer | DevOps  
 Dubai, UAE  
 [LinkedIn](https://linkedin.com/in/nikhil-chandra-133ncsr200233) | 

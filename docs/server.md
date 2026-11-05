@@ -9,9 +9,12 @@ docker compose up -d               # API + Ollama, fully local LLM
 ## API
 
 All endpoints except `/healthz` and the webhook require
-`Authorization: Bearer $DOCGEN_API_TOKEN` when that variable is set. If it
-isn't set, the API is open and logs a warning at startup. `docgen serve` binds
-to 127.0.0.1 by default.
+`Authorization: Bearer $DOCGEN_API_TOKEN`. The server fails closed: if
+`DOCGEN_API_TOKEN` is unset, blank, a placeholder such as `change-me`, or
+shorter than 32 characters, `docgen serve` exits with code 2 instead of
+starting. Generate a token with
+`python -c "import secrets; print(secrets.token_urlsafe(32))"`.
+`docgen serve` binds to 127.0.0.1 by default.
 
 | Method | Path | |
 |---|---|---|
@@ -95,7 +98,7 @@ repeat this step.
   Confluence when you publish there.
 
 ```bash
-cp .env.example .env    # set JIRA_*, DOCGEN_API_TOKEN
+cp .env.example .env    # set JIRA_* and DOCGEN_API_TOKEN (required; the API won't start without it)
 docker compose up -d
 docker compose logs -f docgen
 ```
