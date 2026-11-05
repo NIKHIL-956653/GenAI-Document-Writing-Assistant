@@ -3,7 +3,7 @@
 Open work from the security and reliability audit of November 2026. Each
 ticket records the problem, the evidence, the proposed fix in full, the tests
 that prove it, and an effort estimate. Line references are to the commit
-that added this file.
+that added each ticket.
 
 | Ticket | Title | Severity | Effort |
 |---|---|---|---|
@@ -11,12 +11,18 @@ that added this file.
 | [BACKLOG-2](#backlog-2-sanitise-generated-content-before-publishing-to-confluence) | Sanitise generated content before publishing to Confluence | High | 0.5 day |
 | [BACKLOG-3](#backlog-3-never-publish-a-truncated-or-partial-document) | Never publish a truncated or partial document | High | 1–1.5 days |
 | [BACKLOG-4](#backlog-4-re-runs-and-failures-must-not-create-duplicate-documents) | Re-runs and failures must not create duplicate documents | Medium | 1.5–2 days |
+| [BACKLOG-5](#backlog-5-pin-dependencies-with-a-hashed-lock-file) | Pin dependencies with a hashed lock file | Medium | 0.5 day |
+| [BACKLOG-6](#backlog-6-llm-cost-ceiling) | LLM cost ceiling | Medium | 1–1.5 days |
 
 **Suggested order:** BACKLOG-2 first. It is the cheapest, and it contains the
 worst outcome of BACKLOG-1 (attacker-chosen markup in Confluence). Then
 BACKLOG-3, then BACKLOG-1. BACKLOG-4 shares the "record the document before
 writing to it" step with BACKLOG-3, so do it straight after BACKLOG-3 or
 together with it.
+
+BACKLOG-5 and BACKLOG-6 are independent of the others and of each other.
+BACKLOG-6 step 1 (an explicit output-token cap) is the same change as
+BACKLOG-3 step 2; whichever ships first does it.
 
 The effort estimates for BACKLOG-1, -3 and -4 are higher than in the original
 audit summary because the full scope below includes eval fixtures, a schema
@@ -448,3 +454,243 @@ document. Duplicates still happen on these paths:
   (ticket, template, target), and the store points at it.
 - The CLI and the server running against the same store never publish two
   documents for one ticket.
+
+---
+
+## BACKLOG-5: Pin dependencies with a hashed lock file
+
+**Severity:** Medium · **Effort:** 0.5 day · **Status:** Open
+
+GitHub Actions are already pinned to commit SHAs (in the same PR that added
+this ticket). This ticket covers everything else that is installed or pulled.
+
+### Problem
+
+1. **Python dependencies are open ranges.** Every runtime, server and dev
+   dependency is a `>=` range, and `types-requests` and `types-PyYAML` have
+   no constraint at all. There is no lock file (`pyproject.toml:13-38`). Each
+   install resolves to whatever is newest that day, so CI, Docker builds and
+   developer machines can run different code from one day to the next.
+2. **The build backend is unpinned.** `setuptools>=68` is fetched at build time
+   in an isolated environment (`pyproject.toml:2`).
+3. **The Docker image builds from ranges.** The build stage runs
+   `pip wheel ".[server]"` against the ranges (`Dockerfile:6`). Both stages use
+   `python:3.12-slim` by tag, not digest (`Dockerfile:2`, `Dockerfile:8`).
+4. **Ollama is pulled as `latest`.** `docker-compose.yml` uses
+   `ollama/ollama:latest` for both the server and the one-shot model pull
+   (`docker-compose.yml:15`, `docker-compose.yml:35`). Its own comment says to
+   pin it.
+5. **CI installs from the ranges.** Every job runs `pip install -e ".[dev]"`,
+   with the pip cache keyed on `pyproject.toml` (`.github/workflows/ci.yml:25-26`).
+6. **Nothing keeps pins current.** There is no Dependabot or Renovate
+   configuration, so the action SHAs pinned in this PR will go stale.
+
+### Impact
+
+- **Supply chain.** A compromised or typo-squatted release that satisfies a
+  range is installed automatically, in CI and in the Docker image.
+- **Reproducibility.** A green CI run doesn't prove the next build will
+  behave the same, and an incident can't be traced to an exact dependency set.
+- **Auditing.** `pip-audit` results describe only the day they were run. The
+  audit's clean result applied to that day's resolution, not to a fixed set.
+
+### Proposed fix
+
+1. **Generate hashed, universal lock files.** Use
+   `uv pip compile --universal --generate-hashes`, which produces one lock
+   valid across Python 3.10–3.13, the CI matrix. pip-tools'
+   `pip-compile --generate-hashes` also works, but it resolves for a single
+   Python version, so it would need one lock per version.
+   - `requirements/runtime.lock`: from `pyproject.toml` with the `server` extra.
+   - `requirements/dev.lock`: adds the `dev` extra, constrained to
+     `runtime.lock` so the shared packages match.
+   - `requirements/build.lock`: `setuptools` and `wheel`, for building docgen
+     itself.
+   - Keep the `>=` ranges in `pyproject.toml`. They are right for anyone
+     installing docgen as a package; the locks govern CI, Docker and
+     development.
+   - Add a `make lock` target, or a short script, so regenerating is one
+     command.
+2. **Install from the locks everywhere.** A hashed install can't include an
+   editable package, so each install takes two commands:
+
+   ```bash
+   pip install --require-hashes -r requirements/dev.lock
+   pip install --no-deps --no-build-isolation -e .
+   ```
+
+   - In CI, key the pip cache on the lock files instead of `pyproject.toml`.
+   - In Docker:
+     - build stage: `pip wheel --require-hashes -r requirements/runtime.lock -w /wheels`,
+       then `pip wheel --no-deps --no-build-isolation . -w /wheels`, with the
+       build lock installed first;
+     - final stage: install from `/wheels` with `--no-index`, as now.
+3. **Pin images by digest.** Use `python:3.12-slim@sha256:…` in both
+   Dockerfile stages, and `ollama/ollama:<version>@sha256:…` in both compose
+   services. Keep the readable tag next to the digest.
+4. **Check in CI that the lock is in sync.** Regenerate the locks and fail on
+   `git diff --exit-code`, so a `pyproject.toml` change can't merge without
+   its lock.
+5. **Audit the lock in CI.** Add a job running
+   `pip-audit --require-hashes -r requirements/runtime.lock` and the same for
+   `dev.lock`. It fails the PR on a known vulnerability. Keep accepted
+   exceptions in a reviewed ignore list, each with a reason.
+6. **Automate updates.** Configure Dependabot (`.github/dependabot.yml`) for
+   `github-actions` and `docker` on a weekly schedule. Dependabot updates
+   SHA-pinned actions together with their version comments. For the Python
+   locks, check before choosing whether Dependabot handles the chosen lock
+   format; Renovate supports both uv and pip-tools output if it doesn't.
+   Weekly grouped PRs keep the noise down.
+
+### Tests
+
+- **CI lock-sync job.** Editing a range in `pyproject.toml` without
+  regenerating the lock fails the PR. Verify once on a throwaway branch and
+  note it in the PR.
+- **Hash enforcement.** Hand-edit one hash in a lock on a throwaway branch.
+  The install step fails in CI and in `docker build`.
+- **Docker.** The image's `pip freeze` matches `runtime.lock` exactly, checked
+  as a step in the Docker job.
+- **pip-audit.** The job runs on every PR and fails when a vulnerable
+  version is pinned. Verify once by temporarily pinning a version with a
+  known advisory.
+
+### Acceptance criteria
+
+- No CI job and no Docker build installs a Python package version, or pulls
+  an image, that isn't fixed by a lock file or digest in the repository.
+- The locks cover Python 3.10–3.13.
+- `pip-audit` runs against the locks on every PR.
+- Automated update PRs are configured for Actions, Docker images and Python
+  dependencies.
+
+The audit summary estimated about 2 hours. This scope adds the CI sync check,
+the audit job, digest pins and update automation, which is closer to half a day.
+
+---
+
+## BACKLOG-6: LLM cost ceiling
+
+**Severity:** Medium · **Effort:** 1–1.5 days · **Status:** Open
+
+### Problem
+
+docgen tracks and logs cost, and skips unchanged tickets, but nothing stops
+spending:
+
+1. **No output cap per call.** No `max_tokens` is sent to OpenRouter
+   (`src/docgen/llm/openrouter.py:63`), and no `num_predict` to Ollama
+   (`src/docgen/llm/ollama.py:42`). Each call's output is bounded only by the
+   provider's default.
+2. **Cost is reported, never enforced.** The pipeline computes cost per ticket
+   (`src/docgen/pipeline.py:243`) and logs totals in `log_summary`. No budget
+   is checked anywhere. `DEFAULT_PRICE_IN` and `DEFAULT_PRICE_OUT`
+   (`src/docgen/pipeline.py:48-49`) are only used to estimate cost when the
+   provider doesn't report it, and are wrong for any other model.
+3. **API callers choose the model and the volume.**
+   - `POST /generate` and `POST /publish` accept any `model` string
+     (`src/docgen/server.py:61`), so a caller can pick the most expensive
+     model on OpenRouter.
+   - `max_results` allows up to 500 tickets per JQL request
+     (`src/docgen/server.py:58`).
+   - `force: true` bypasses the unchanged-ticket skip
+     (`src/docgen/server.py:63`).
+   - Jobs aren't rate-limited or capped in number.
+   - Up to `workers × concurrency` LLM calls run at once, 8 by default and up
+     to 512 at the configured maxima (`src/docgen/config.py:176-177`).
+4. **The CLI has no upper bound.** `--max-results` defaults to 100 but accepts
+   any positive number (`src/docgen/cli.py:78`).
+5. **Retries can repeat billed calls.** An empty completion raises a
+   retryable error (`src/docgen/llm/openrouter.py:80`,
+   `src/docgen/llm/ollama.py:53`). The provider has usually billed it, and up
+   to 3 more calls follow. Their usage is never recorded, because the error
+   is raised before `TokenUsage` is built.
+6. **The eval judge doubles calls.** `docgen eval --judge` makes a second
+   LLM call per document. Its cost is reported but not limited
+   (`src/docgen/eval/runner.py:91-92`).
+
+### Impact
+
+- **Through the API.** Anyone holding the API token can queue repeated
+  500-ticket `force` jobs against an expensive model. Spend is bounded only by
+  the OpenRouter account's credit and its own limits.
+- **Through the webhook.** A Jira user who can edit and transition issues
+  causes one generation per change. That is bounded by the unchanged-ticket
+  skip, but by nothing else.
+- **No warning.** Spend appears only in logs after the fact; there is no
+  alert or stop as a limit approaches.
+
+Ollama runs cost no money, but the same controls bound how long the local
+machine is kept busy.
+
+### Proposed fix
+
+1. **Cap output per call.** Add `OPENROUTER_MAX_OUTPUT_TOKENS` and
+   `OLLAMA_NUM_PREDICT` and send them as `max_tokens` and
+   `options.num_predict`. This is the same change as BACKLOG-3 step 2, which
+   also handles the truncation it can cause.
+2. **Allowlist models on the server.** Add `DOCGEN_ALLOWED_MODELS`, a
+   comma-separated list defaulting to the configured default model. An API
+   request naming any other model gets 400. The CLI is run by the operator, so
+   it stays unrestricted.
+3. **Keep a spend ledger** in the SQLite store: a `spend` table with
+   timestamp, source (`cli`, `api`, `webhook`, `eval`, `judge`), job id,
+   ticket, model, prompt and completion tokens, cost in USD, and whether the
+   cost was reported or estimated.
+   - Record every completion, including eval and judge calls.
+   - Record attempts that returned usage but were rejected as empty: build
+     `TokenUsage` before raising.
+4. **Use real prices.** At startup, fetch OpenRouter's model list
+   (`GET /api/v1/models`, which includes per-token prompt and completion
+   prices) and cache it. Use it for pre-call estimates. Fall back to
+   `--price-in` and `--price-out` if the fetch fails, and log that the
+   estimate may be wrong.
+5. **Enforce budgets before each call.**
+   - Settings: `DOCGEN_BUDGET_DAILY_USD`, and `DOCGEN_BUDGET_RUN_USD` per CLI
+     run or server job.
+   - Before each LLM call, reserve its worst-case cost: estimated prompt
+     tokens × input price + output cap × output price. Do this in a
+     `BEGIN IMMEDIATE` transaction against the ledger, so concurrent workers
+     and processes can't overspend together.
+   - Settle the reservation with the actual cost afterwards.
+   - If the reservation would exceed a budget, raise `BudgetExceededError`.
+     Treat it like a configuration error: it cancels the rest of the batch
+     instead of failing every remaining ticket one by one. The local Markdown
+     for completed tickets is kept.
+   - **Defaults are a decision for the owner.** The proposal: the server gets
+     a conservative daily cap, such as $5, raised explicitly. The CLI gets no
+     default cap, but logs remaining budget when one is set.
+6. **Bound request volume on the server.**
+   - Lower the `max_results` ceiling to 100.
+   - Return 429 when queued jobs exceed `workers × 10`.
+   - Cap webhook generations per ticket per day, using the ledger, default 3.
+7. **Report spend.**
+   - Add a `docgen spend [--since DATE] [--by model|source|ticket]` command
+     and an authenticated `GET /spend` endpoint that summarise the ledger.
+   - Include spend and remaining budget in `log_summary` and in job results.
+   - Log a warning once 80% of a budget is used.
+
+### Tests
+
+- `max_tokens` and `options.num_predict` are sent.
+- An API request with a model outside the allowlist gets 400, with no job
+  queued.
+- A ledger row is written per completion, including eval and judge calls,
+  and for an empty completion that reported usage.
+- A budget that would be exceeded raises `BudgetExceededError` before any
+  OpenRouter request. The Router fake sees no call, and the remaining tickets
+  are cancelled with a clear error.
+- Concurrency: two threads, and two processes sharing one store, reserving
+  against a budget that fits only one call. Exactly one proceeds.
+- The daily budget resets at the window boundary, using an injected clock.
+- A failed price fetch falls back to the configured prices, with a warning.
+- The job queue limit returns 429. The per-ticket webhook cap is honoured.
+- `docgen spend` and `GET /spend` totals match the ledger.
+
+### Acceptance criteria
+
+- With a budget set, recorded spend never exceeds it, including under
+  concurrent workers and separate processes.
+- No API caller can select a model outside the allowlist.
+- Every billed LLM call, including retries and eval judge calls, appears in
+  the ledger.
