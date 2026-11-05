@@ -11,7 +11,6 @@ requires-python = ">=3.10"
 authors = [{ name = "Nikhil Chandra Sairam Tokala" }]
 dependencies = [
     "requests>=2.31",
-    "python-dotenv>=1.0",
     "pydantic>=2.5",
     "pydantic-settings>=2.1",
     "markdown>=3.5",
@@ -19,6 +18,7 @@ dependencies = [
     "google-auth>=2.23",
     "google-auth-oauthlib>=1.1",
     "google-auth-httplib2>=0.1",
+    "httplib2>=0.19",
     "PyYAML>=6.0",
 ]
 
